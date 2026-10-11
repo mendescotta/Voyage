@@ -120,8 +120,3 @@ pub struct MirrorsFields {
     pub hw_drivers: bool,
     pub driver_set: DriverSet,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-}

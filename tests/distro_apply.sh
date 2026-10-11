@@ -180,6 +180,16 @@ check "unpack precedes configuration" "$CALLS" "|xbps-install -SyU virtualbox-os
 # when system updates are off.
 hardware_needs_vbox() { return 0; }
 fresh_conf; reset; OPTS_VBOX=0; OPTS_UPDATE=0; CONFIGURED_PATCHED=0
+# Offline guest packages are already copied from the live image.
+chroot() {
+    shift
+    case "$1" in
+        xbps-query) return 0 ;;
+        xbps-reconfigure)
+            if ! grep -q vboxvideo "$CONF" && ! grep -q vboxvideo "${CONF%/dkms.conf}/Makefile"; then CONFIGURED_PATCHED=1; fi ;;
+        dkms) printf '%s\n' "$DKMS_STATUS" ;;
+    esac
+}
 install_vbox_guest
 check "hardware guest package is patched even without system updates" "$CONFIGURED_PATCHED" "1"
 

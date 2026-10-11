@@ -363,7 +363,7 @@ mod tests {
         assert_eq!(edit_page("Nonfree repository"), Some(MIRRORS));
         assert_eq!(edit_page("User shell"), Some(USERS));
         assert_eq!(edit_page("Root shell"), Some(USERS));
-        assert_eq!(edit_page("VirtualBox guest additions"), Some(MIRRORS));
+        assert_eq!(edit_page("Hardware drivers"), Some(MIRRORS));
         assert_eq!(edit_page("Bootloader"), Some(DISKS));
         assert_eq!(edit_page("Something new"), None);
     }

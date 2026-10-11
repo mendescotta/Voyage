@@ -19,9 +19,9 @@ voidhw() { CALLS="$CALLS|voidhw $*"; return "$VOIDHW_STATUS"; }
 fails=0
 check() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: got '$2', want '$3'"; fails=$((fails + 1)); fi; }
 
-SET=generic;  check "generic is the default driver set" "$(initramfs_dracut_args)" "--no-hostonly --add-drivers ahci"
-SET="";       check "an unset driver set is generic"     "$(initramfs_dracut_args)" "--no-hostonly --add-drivers ahci"
-SET=targeted; check "targeted uses dracut --hostonly"    "$(initramfs_dracut_args)" "--hostonly"
+SET=generic;  check "generic is the default driver set" "$(initramfs_dracut_args)" "--no-hostonly --add-drivers ahci --force-add i18n"
+SET="";       check "an unset driver set is generic"     "$(initramfs_dracut_args)" "--no-hostonly --add-drivers ahci --force-add i18n"
+SET=targeted; check "targeted uses dracut --hostonly"    "$(initramfs_dracut_args)" "--hostonly --force-add i18n"
 
 HW=1; VOIDHW_STATUS=0; CALLS=""; UI=""
 install_hardware_drivers

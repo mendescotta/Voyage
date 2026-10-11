@@ -315,9 +315,13 @@ copy_rootfs() {
     echo "Copying system files..."
     # what tar is about to read, so the checkpoints can be shown as a percentage
     total="$(du -sxb / 2>/dev/null | cut -f1)"
+    # Keep mount points, but leave kernel runtime data and SSH-agent sockets
+    # in the live session. Archive relative paths for extraction into TARGETDIR.
     tar --create --one-file-system --xattrs \
+        --exclude='./sys/*' \
+        --exclude='./home/*/.ssh/agent' --exclude='./root/.ssh/agent' \
         --checkpoint=500 --checkpoint-action=echo="@CKPT %u" \
-        -f - / 2> >(copy_progress_reader "$total") | \
+        -f - -C / . 2> >(copy_progress_reader "$total") | \
         tar --extract --xattrs --xattrs-include='*' --preserve-permissions -f - -C "$TARGETDIR"
 
     if [ $? -ne 0 ]; then
@@ -758,7 +762,7 @@ EOF
 
 remove_installer_packages() {
     local pkg installed=""
-    for pkg in $(distro_values remove); do
+    for pkg in $(distro_values remove) ${UNUSED_BOOTLOADER_PACKAGES:-}; do
         chroot "$TARGETDIR" xbps-query "$pkg" >/dev/null 2>&1 && installed="$installed $pkg"
     done
     [ -n "$installed" ] || return 0
@@ -994,13 +998,9 @@ EOF
 }
 
 remove_unused_bootloaders() {
-    local pkgs="" pkg
-    for pkg in "$@"; do
-        chroot "$TARGETDIR" xbps-query "$pkg" >/dev/null 2>&1 && pkgs="$pkgs $pkg"
-    done
-    [ -n "$pkgs" ] || return 0
-    # -R also removes dependents (grub-*-efi depend on grub); keep stderr visible
-    chroot "$TARGETDIR" xbps-remove -Ry $pkgs || echo "Warning: could not remove unused bootloaders:$pkgs"
+    # Defer removal until installer cleanup so XBPS resolves dependents and
+    # orphans in one transaction. The chosen bootloader is marked manual first.
+    UNUSED_BOOTLOADER_PACKAGES="$*"
 }
 
 set_bootloader() {
