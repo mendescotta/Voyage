@@ -68,7 +68,7 @@ pub fn confirm(
 pub fn about(parent: &Window) {
     let about = adw::AboutDialog::builder()
         .application_name("Voyage")
-        .application_icon("system-software-install")
+        .application_icon("org.voidlinux.voyage")
         .developer_name("Void Dinit ISO")
         .version(concat!(env!("CARGO_PKG_VERSION"), " (GTK4)"))
         .copyright("\u{a9} 2026 Void Dinit ISO")

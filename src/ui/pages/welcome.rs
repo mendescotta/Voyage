@@ -9,6 +9,7 @@ use gtk::prelude::*;
 
 use crate::backend::requirements::{self, Level};
 use crate::backend::{locales, system_detect};
+use crate::ui::pages::{add_column, group_columns};
 use crate::ui::widgets::{ActionRow, Banner, ComboRow, Group};
 use crate::ui::SysData;
 
@@ -34,14 +35,14 @@ impl WelcomePage {
     pub fn new(sys_data: &SysData) -> Self {
         let widget = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(24)
-            .margin_start(24)
-            .margin_end(24)
+            .spacing(12)
+            .margin_top(16)
+            .margin_start(16)
+            .margin_end(16)
             .build();
 
         let logo = gtk::Image::builder()
-            .pixel_size(80)
+            .pixel_size(64)
             .halign(gtk::Align::Center)
             .build();
         // installed: from the icon theme; run from the source tree: straight from the file
@@ -57,8 +58,16 @@ impl WelcomePage {
         let heading = gtk::Label::builder()
             .label("Welcome! Let's set up your regional settings")
             .css_classes(["title-1"])
+            .wrap(true)
             .build();
         widget.append(&heading);
+
+        let columns = group_columns();
+        widget.append(&columns);
+        let settings = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
+            .build();
 
         let check_group = Group::new("System check");
         for check in &sys_data.checks {
@@ -67,7 +76,7 @@ impl WelcomePage {
             row.add_suffix(status_icon(check.level).upcast_ref());
             check_group.add(&row);
         }
-        widget.append(check_group.as_ref());
+        add_column(&columns, check_group.as_ref());
         if let Some(reason) = requirements::blocking_summary(&sys_data.checks) {
             let banner = Banner::new(&format!("The installation cannot start:\n{reason}"));
             widget.append(banner.as_ref());
@@ -98,7 +107,7 @@ impl WelcomePage {
             .collect();
         let locale_row = ComboRow::new("System language", &language_names);
         locale_group.add(&locale_row);
-        widget.append(locale_group.as_ref());
+        settings.append(locale_group.as_ref());
         let default_locale_idx = locales_list
             .iter()
             .position(|l| l.starts_with("en_US"))
@@ -116,7 +125,7 @@ impl WelcomePage {
         let city_row = ComboRow::new("City", &first_region_cities);
         tz_group.add(&region_row);
         tz_group.add(&city_row);
-        widget.append(tz_group.as_ref());
+        settings.append(tz_group.as_ref());
 
         let mut keymaps = system_detect::detect_keymaps();
         if keymaps.is_empty() {
@@ -126,7 +135,8 @@ impl WelcomePage {
         let keymap_group = Group::new("Keyboard");
         let keymap_row = ComboRow::new("Layout", &keymap_names);
         keymap_group.add(&keymap_row);
-        widget.append(keymap_group.as_ref());
+        settings.append(keymap_group.as_ref());
+        add_column(&columns, settings.upcast_ref());
         let default_keymap_idx = keymaps.iter().position(|k| k == "us").unwrap_or(0);
         keymap_row.set_selected(default_keymap_idx as u32);
 

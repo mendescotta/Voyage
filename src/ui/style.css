@@ -1,26 +1,34 @@
 /* Structure only: colors come from the active GTK theme (adw-gtk3, Adwaita, ...). */
-.voyage-tabs {
-    border-bottom: 1px solid alpha(currentColor, 0.15);
+.voyage-sidebar {
+    border-right: 1px solid alpha(currentColor, 0.15);
+    background: alpha(currentColor, 0.035);
 }
-.voyage-tabs button {
+.voyage-sidebar-list {
+    margin: 12px 8px;
+}
+.voyage-sidebar-list button {
     background: none;
     box-shadow: none;
     border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    padding: 10px 16px;
+    border-left: 3px solid transparent;
+    border-radius: 6px;
+    padding: 10px 12px;
     min-height: 0;
 }
-.voyage-tabs button:checked {
-    background: none;
-    border-bottom-color: @theme_selected_bg_color;
+.voyage-sidebar-list button:checked {
+    background: alpha(currentColor, 0.10);
+    border-left-color: @theme_selected_bg_color;
 }
-.voyage-tabs button:disabled {
+.voyage-sidebar-list button:disabled {
     opacity: 0.45;
 }
 .voyage-panel {
     border-radius: 8px;
-    margin: 12px;
+    margin: 8px 12px 0;
+}
+.voyage-columns > flowboxchild {
+    background: none;
+    box-shadow: none;
 }
 .voyage-group row {
     border-bottom: 1px solid alpha(currentColor, 0.1);

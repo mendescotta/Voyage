@@ -75,7 +75,7 @@ pub fn about(parent: &Window) {
         .transient_for(parent)
         .modal(true)
         .program_name("Voyage")
-        .logo_icon_name("system-software-install")
+        .logo_icon_name("org.voidlinux.voyage")
         .authors(["Void Dinit ISO"])
         .version(concat!(env!("CARGO_PKG_VERSION"), " (GTK4)"))
         .copyright("\u{a9} 2026 Void Dinit ISO")
@@ -150,11 +150,13 @@ fn base_row(
         .label(title)
         .halign(gtk::Align::Start)
         .wrap(true)
+        .max_width_chars(35)
         .xalign(0.0)
         .build();
     let subtitle = gtk::Label::builder()
         .halign(gtk::Align::Start)
         .wrap(true)
+        .max_width_chars(35)
         .xalign(0.0)
         .visible(false)
         .css_classes(["dim-label", "caption"])
@@ -234,8 +236,35 @@ pub struct ComboRow {
 
 impl ComboRow {
     pub fn new(title: &str, items: &[String]) -> Self {
+        // Keep long device and locale names in the menu, but let the selected value
+        // shrink so groups can share a row on medium-sized screens.
+        let selected_factory = gtk::SignalListItemFactory::new();
+        selected_factory.connect_setup(|_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            let label = gtk::Label::builder()
+                .max_width_chars(24)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            item.set_child(Some(&label));
+        });
+        selected_factory.connect_bind(|_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            if let (Some(label), Some(value)) = (
+                item.child().and_then(|w| w.downcast::<gtk::Label>().ok()),
+                item.item()
+                    .and_then(|w| w.downcast::<gtk::StringObject>().ok()),
+            ) {
+                label.set_text(&value.string());
+                label.set_tooltip_text(Some(&value.string()));
+            }
+        });
         let drop = gtk::DropDown::builder()
             .model(&string_list(items))
+            .factory(&selected_factory)
             .valign(gtk::Align::Center)
             .build();
         let (row, _t, _s, _o) = base_row(title, Some(drop.upcast_ref()), false);

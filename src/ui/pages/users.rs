@@ -1,6 +1,7 @@
 use gtk::prelude::*;
 
 use crate::backend::distro::DistroConf;
+use crate::ui::pages::{add_column, group_columns};
 use crate::ui::widgets::{ComboRow, EntryRow, Group, SwitchRow};
 use crate::ui::SysData;
 
@@ -26,16 +27,19 @@ impl UsersPage {
     pub fn new(sys_data: &SysData) -> Self {
         let widget = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(24)
-            .margin_start(24)
-            .margin_end(24)
+            .spacing(12)
+            .margin_top(16)
+            .margin_start(16)
+            .margin_end(16)
             .build();
 
         let system_group = Group::new("Computer");
         let hostname_row = EntryRow::new("Computer name", "void");
         system_group.add(&hostname_row);
         widget.append(system_group.as_ref());
+
+        let columns = group_columns();
+        widget.append(&columns);
 
         let user_group = Group::new("Your account");
         let fullname_row = EntryRow::new("Full name", "void");
@@ -53,7 +57,7 @@ impl UsersPage {
         let user_shell_row = ComboRow::new("Login shell", &shell_labels);
         user_shell_row.set_selected(distro.default_index() as u32);
         user_group.add(&user_shell_row);
-        widget.append(user_group.as_ref());
+        add_column(&columns, user_group.as_ref());
 
         let root_group = Group::new("Root account");
         let same_password_row = SwitchRow::new("Use my account password for root");
@@ -66,7 +70,7 @@ impl UsersPage {
         let root_shell_row = ComboRow::new("Login shell", &shell_labels);
         root_shell_row.set_selected(distro.default_index() as u32);
         root_group.add(&root_shell_row);
-        widget.append(root_group.as_ref());
+        add_column(&columns, root_group.as_ref());
         if let Some(hint) = shell_hint(&distro, sys_data.net) {
             let label = gtk::Label::builder()
                 .label(hint)

@@ -30,8 +30,8 @@ mod tests {
     use super::STYLE_CSS;
 
     #[test]
-    fn stylesheet_is_embedded_and_styles_the_tab_bar() {
-        assert!(STYLE_CSS.contains(".voyage-tabs"));
+    fn stylesheet_is_embedded_and_styles_the_sidebar() {
+        assert!(STYLE_CSS.contains(".voyage-sidebar-list"));
     }
 
     #[cfg(feature = "adwaita")]
@@ -54,5 +54,16 @@ mod tests {
             !main_rs.contains("CARGO_MANIFEST_DIR"),
             "main.rs must not read style.css from a build-time path: it does not exist on an installed system"
         );
+    }
+
+    #[test]
+    fn checkout_icon_is_available_by_name() {
+        super::gtk_test::run("checkout icon", || {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/images");
+            let display = gtk::gdk::Display::default().expect("GTK test has a display");
+            let theme = gtk::IconTheme::for_display(&display);
+            theme.add_search_path(dir);
+            assert!(theme.has_icon("org.voidlinux.voyage"));
+        });
     }
 }

@@ -9,6 +9,7 @@ use gtk::prelude::*;
 use crate::backend::config_schema::{DiskChoices, RawPartitions, SwapStrategy};
 use crate::backend::paths::auto_partition_script;
 use crate::backend::system_detect::{self, check_disk_health, Disk, HealthStatus, PartitionDetail};
+use crate::ui::pages::{add_column, group_columns};
 use crate::ui::widgets::{self, ActionRow, Banner, ComboRow, Group, SwitchRow};
 use crate::ui::SysData;
 
@@ -45,11 +46,12 @@ impl DisksPage {
     pub fn new(sys_data: &SysData) -> Self {
         let widget = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(18)
-            .margin_top(24)
-            .margin_start(24)
-            .margin_end(24)
+            .spacing(12)
+            .margin_top(16)
+            .margin_start(16)
+            .margin_end(16)
             .build();
+        let columns = group_columns();
         let is_efi = sys_data.efi;
 
         let auto_group = Group::new("Automatic partitioning");
@@ -74,14 +76,16 @@ impl DisksPage {
         let shred_row = SwitchRow::new("Securely erase disk first");
         shred_row.set_subtitle("Overwrites the disk with zeros before partitioning. Adds time proportional to disk size.");
         let auto_button = gtk::Button::builder()
-            .label("Partition automatically")
+            .label("Erase and partition")
             .css_classes(["destructive-action"])
             .build();
-        let auto_row = ActionRow::new("Erase disk and create partitions");
+        let auto_row = ActionRow::new("Automatic layout");
         auto_row.add_suffix(auto_button.upcast_ref());
         let health_label = gtk::Label::builder()
             .css_classes(["dim-label", "caption"])
             .halign(gtk::Align::Start)
+            .wrap(true)
+            .max_width_chars(38)
             .build();
         auto_group.add(&disk_row);
         auto_group.add(&ActionRow::with_child(health_label.upcast_ref()));
@@ -95,7 +99,8 @@ impl DisksPage {
             ));
             widget.append(note.as_ref());
         }
-        widget.append(auto_group.as_ref());
+        widget.append(&columns);
+        add_column(&columns, auto_group.as_ref());
 
         let manual_group = Group::new("Manual assignment");
         let root_row = ComboRow::new("Root (/)", &[]);
@@ -130,7 +135,7 @@ impl DisksPage {
         let gparted_row = ActionRow::new("Need finer control?");
         gparted_row.add_suffix(gparted_button.upcast_ref());
         manual_group.add(&gparted_row);
-        widget.append(manual_group.as_ref());
+        add_column(&columns, manual_group.as_ref());
 
         let fs_group = Group::new("Filesystem");
         let filesys_row = ComboRow::new(
@@ -151,7 +156,7 @@ impl DisksPage {
         btrfs_snapshots_row.set_visible(false);
         fs_group.add(&btrfs_flat_row);
         fs_group.add(&btrfs_snapshots_row);
-        widget.append(fs_group.as_ref());
+        add_column(&columns, fs_group.as_ref());
 
         {
             let btrfs_flat_row = btrfs_flat_row.clone();
@@ -186,7 +191,7 @@ impl DisksPage {
                 .collect::<Vec<_>>(),
         );
         bootloader_group.add(&bootloader_row);
-        widget.append(bootloader_group.as_ref());
+        add_column(&columns, bootloader_group.as_ref());
 
         let state = Rc::new(RefCell::new(State {
             disks,

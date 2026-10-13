@@ -28,7 +28,7 @@ struct State {
     installation: InstallationPage,
     stack: gtk::Stack,
     tabs: Vec<gtk::ToggleButton>,
-    tab_bar: gtk::Box,
+    sidebar: gtk::ScrolledWindow,
     back_button: gtk::Button,
     next_button: gtk::Button,
     current_index: usize,
@@ -47,7 +47,16 @@ fn scrollable(page: &gtk::Box) -> gtk::ScrolledWindow {
 }
 
 pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
-    let window = widgets::new_window(app, "Voyage", 880, 620);
+    let window = widgets::new_window(app, "Voyage", 960, 620);
+    if std::env::var_os("VOYAGE_SCREENSHOTS").is_some() {
+        if let Some((width, height)) = std::env::var("VOYAGE_SCREENSHOT_SIZE")
+            .ok()
+            .and_then(|size| size.split_once('x').map(|(w, h)| (w.parse(), h.parse())))
+            .and_then(|(w, h)| Some((w.ok()?, h.ok()?)))
+        {
+            window.set_default_size(width, height);
+        }
+    }
 
     let welcome = WelcomePage::new(&sys_data);
     let mirrors = MirrorsPage::new(&sys_data);
@@ -96,15 +105,15 @@ pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
         pages::review::TITLE,
     ];
     let tab_bar = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .css_classes(["voyage-tabs"])
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["voyage-sidebar-list"])
         .build();
     let mut tabs: Vec<gtk::ToggleButton> = Vec::new();
     for title in tab_titles {
         let tab = gtk::ToggleButton::builder()
             .label(title)
             .has_frame(false)
-            .hexpand(true)
+            .halign(gtk::Align::Fill)
             .build();
         if let Some(first) = tabs.first() {
             tab.set_group(Some(first));
@@ -112,7 +121,13 @@ pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
         tab_bar.append(&tab);
         tabs.push(tab);
     }
-
+    let sidebar = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vscrollbar_policy(gtk::PolicyType::Automatic)
+        .width_request(190)
+        .css_classes(["voyage-sidebar"])
+        .child(&tab_bar)
+        .build();
     let header_bar = gtk::HeaderBar::new();
     let about_button = gtk::Button::builder()
         .icon_name("help-about-symbolic")
@@ -144,12 +159,17 @@ pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
     bottom_bar.append(&gtk::Box::builder().hexpand(true).build());
     bottom_bar.append(&next_button);
 
-    let body = gtk::Box::builder()
+    let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
+        .hexpand(true)
         .build();
-    body.append(&tab_bar);
-    body.append(&panel);
-    body.append(&bottom_bar);
+    content.append(&panel);
+    content.append(&bottom_bar);
+    let body = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .build();
+    body.append(&sidebar);
+    body.append(&content);
     widgets::set_window_content(&window, &header_bar, body.upcast_ref());
 
     let state = Rc::new(RefCell::new(State {
@@ -163,7 +183,7 @@ pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
         installation,
         stack,
         tabs,
-        tab_bar,
+        sidebar,
         back_button,
         next_button,
         current_index: 0,
@@ -283,7 +303,8 @@ pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
 }
 
 /// Developer aid: with `VOYAGE_SCREENSHOTS=<dir>` the window visits each setup tab, saves a PNG
-/// of it to `<dir>/<n>-<title>.png`, then quits. Used to review the UI without a screen grabber.
+/// of it to `<dir>/<n>-<title>.png`, then quits. `VOYAGE_SCREENSHOT_SIZE=640x560` overrides the
+/// window size to review compact layouts.
 fn screenshot_tour(state: &Rc<RefCell<State>>, dir: std::path::PathBuf) {
     let titles = [
         pages::welcome::TITLE,
@@ -362,7 +383,7 @@ fn update_nav(state: &Rc<RefCell<State>>) {
         "Next"
     });
 
-    s.tab_bar.set_visible(tabs_visible(page));
+    s.sidebar.set_visible(tabs_visible(page));
     for (i, tab) in s.tabs.iter().enumerate() {
         tab.set_sensitive(tab_enabled(i, page));
         if tab.is_active() != (i == page) {

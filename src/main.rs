@@ -22,6 +22,18 @@ fn load_theme() {
     }
 }
 
+fn load_app_icon() {
+    if let (Some(display), Some(icon)) = (gdk::Display::default(), backend::paths::icon_file()) {
+        let theme = gtk::IconTheme::for_display(&display);
+        if !theme.has_icon("org.voidlinux.voyage") {
+            if let Some(dir) = icon.parent() {
+                theme.add_search_path(dir);
+            }
+        }
+    }
+    gtk::Window::set_default_icon_name("org.voidlinux.voyage");
+}
+
 fn detect_system_data() -> SysData {
     let net = system_detect::has_internet(std::time::Duration::from_secs(3));
     let checks = requirements::evaluate(&requirements::Facts::detect(net));
@@ -41,7 +53,7 @@ fn main() -> glib::ExitCode {
     let app = ui::widgets::new_app("org.voidlinux.Voyage");
 
     app.connect_activate(move |app| {
-        gtk::Window::set_default_icon_name("org.voidlinux.voyage");
+        load_app_icon();
         load_theme();
         let sys_data = detect_system_data();
         let window = ui::window::build(app, sys_data, demo);

@@ -1,7 +1,8 @@
 # voyage
 
 A GTK4 installer for Void Linux. It drives the `void-installer` shell backend (partitioning,
-rootfs copy, bootloader, users) from a tabbed UI: Welcome, Mirror and Software, Users, Disks, Review.
+rootfs copy, bootloader, users) from a sidebar UI: Welcome, Mirror and Software, Users, Disks, Review.
+The sidebar stays visible as the window narrows, while page groups wrap into one column.
 
 - System check on the Welcome page (memory, storage, firmware, power, internet, administrator access).
   A failed required check disables Install; the rest only informs.
@@ -10,7 +11,7 @@ rootfs copy, bootloader, users) from a tabbed UI: Welcome, Mirror and Software, 
 - Real progress while the system is copied (a percentage from `tar` checkpoints), not a timer.
 - Success or failure appears above the installation output, which stays visible after completion.
   Restart uses a privileged helper and recognizes dinit even when PID 1 is named `init`.
-- Every tab is available at any time. Review has an Edit button per choice; after editing, Next becomes
+- Every setup section is available at any time. Review has an Edit button per choice; after editing, Next becomes
   "Back to review". Review and Install validate all pages again.
 - Login shell for the user and for root, chosen separately on the Users page: bash (the default), zsh or
   fish. Shells that are not on the live image are installed from the network; offline, or if that fails,
@@ -41,7 +42,6 @@ The backend is `resources/backend/` (found next to the binary under `share/voyag
 ## References
 
 - [void-mklive](https://github.com/void-linux/void-mklive): `installer.sh`, the backend this installer wraps and adapts.
-- [Kasha Installer](https://codeberg.org/Crow_rei/Kasha-Installer): the top tab bar layout.
 - [rEFInd](https://www.rodsbooks.com/refind/) and the [RONBM theme](https://github.com/gutlessCGH) (MIT, bundled in `resources/backend/refind-theme/`).
 - [gtk4-rs](https://gtk-rs.org/) and [libadwaita-rs](https://world.pages.gitlab.gnome.org/Rust/libadwaita-rs/).
 

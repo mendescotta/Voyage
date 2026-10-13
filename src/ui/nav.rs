@@ -9,7 +9,7 @@ pub const COMPLETION: usize = 6;
 /// Welcome, Mirrors, Users, Disks, Review.
 pub const TAB_COUNT: usize = 5;
 
-/// The tab row is only shown while the user is still setting things up.
+/// The section navigation is only shown while the user is still setting things up.
 pub fn tabs_visible(current: usize) -> bool {
     current < INSTALLATION
 }
