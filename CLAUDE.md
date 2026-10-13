@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # voyage
 
 GTK4/Rust installer for Void, built on the official `void-installer` shell
