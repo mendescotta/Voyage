@@ -13,8 +13,8 @@ backend. Flagship project. Public repo. Design notes: @DEVNOTES.md (local, gitig
 - Backend is the shell scripts in `resources/backend` (`backend_install.sh`,
   `auto_partition.sh`); the GUI is unprivileged and spawns `pkexec`.
   `backend::config_schema` and `install_runner` stay GTK-free and tested.
-- Dev env vars: `VOYAGE_BACKEND_DIR` (backend scripts), `VOYAGE_SCREENSHOTS` (screenshot mode in
-  `ui/window.rs`), `--demo` (no disk access).
+- Dev env vars: `VOYAGE_BACKEND_DIR` (backend scripts), `VOYAGE_SCREENSHOTS` (screenshot tour in
+  `ui/window.rs`), `VOYAGE_SCREENSHOT_SIZE` (tour window size), `--demo` (no disk access).
 - The backend reports progress as `>>> PROGRESS n` lines (percent of the root copy) next to the
   `>>> TOKEN` milestones; the runner maps them into the copy slice of the bar (`COPY_RANGE`).
 - The live medium is hidden in the UI (`Disk::live_medium`) and refused by `live_guard.sh`; keep both.

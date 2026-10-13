@@ -1,8 +1,8 @@
 # voyage
 
 A GTK4 installer for Void Linux. It drives the `void-installer` shell backend (partitioning,
-rootfs copy, bootloader, users) from a sidebar UI: Welcome, Mirror and Software, Users, Disks, Review.
-The sidebar stays visible as the window narrows, while page groups wrap into one column.
+rootfs copy, bootloader, users) from five setup sections: Welcome, Mirror and Software, Users,
+Disks, and Review.
 
 - System check on the Welcome page (memory, storage, firmware, power, internet, administrator access).
   A failed required check disables Install; the rest only informs.
@@ -30,7 +30,29 @@ The sidebar stays visible as the window narrows, while page groups wrap into one
 - Bootloaders: GRUB, Limine, rEFInd (with the RONBM theme).
 - Drivers: [voidhw](https://github.com/mendescotta/voidhw) detects the hardware and installs the right GPU driver, firmware, microcode and VM guest tools. The initramfs can be generic (any hardware) or targeted (this machine only).
 - Plain GTK4 by default; `--features adwaita` builds with libadwaita.
-- `voyage --demo` walks the UI without touching disks.
+- `voyage --demo` opens the UI without installing to any disk.
+
+## Interface and demo
+
+The setup sections stay in the left sidebar, including at narrow window widths. Welcome, Users,
+and Disks place groups side by side when there is room and stack them when there is not. Each
+page scrolls independently; Back and Next remain at the bottom of the window. Section navigation
+is hidden while installation runs. The About dialog uses the same Voyage sailboat icon as Welcome.
+
+Run the interface without installing anything:
+
+```sh
+cargo run -- --demo
+```
+
+To save screenshots of Welcome, Mirror and Software, Users, and Disks, set a destination directory.
+The tour quits when it finishes. Set `VOYAGE_SCREENSHOT_SIZE` to review a specific window size:
+
+```sh
+VOYAGE_SCREENSHOTS=/tmp/voyage-ui VOYAGE_SCREENSHOT_SIZE=640x560 cargo run -- --demo
+```
+
+## Build and test
 
 ```
 cargo build --release && cargo test
