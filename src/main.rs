@@ -1,4 +1,5 @@
 mod backend;
+mod renderer;
 mod ui;
 
 use std::env;
@@ -46,6 +47,7 @@ fn detect_system_data() -> SysData {
 }
 
 fn main() -> glib::ExitCode {
+    renderer::configure_at_startup();
     let demo = env::args().any(|a| a == "--demo");
 
     glib::set_prgname(Some("voyage"));
