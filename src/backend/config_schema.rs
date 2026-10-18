@@ -160,8 +160,25 @@ fn is_gpt_without_bios_boot(disk_dev: &str) -> bool {
 }
 
 fn bootloader_disk(root_dev: &str) -> String {
+    if let Ok(output) = Command::new("lsblk")
+        .args(["-ndo", "PKNAME", root_dev])
+        .output()
+    {
+        if output.status.success() {
+            let parent = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !parent.is_empty() {
+                return format!("/dev/{parent}");
+            }
+        }
+    }
     let trimmed = root_dev.trim_end_matches(|c: char| c.is_ascii_digit());
-    if trimmed.contains("nvme") && trimmed.ends_with('p') {
+    if ["nvme", "mmcblk", "loop", "md"].iter().any(|prefix| {
+        trimmed
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.starts_with(prefix))
+    }) && trimmed.ends_with('p')
+    {
         trimmed[..trimmed.len() - 1].to_string()
     } else {
         trimmed.to_string()
@@ -191,6 +208,7 @@ pub struct DiskChoices {
     pub raw_parts: RawPartitions,
     pub filesystem: String,
     pub want_efi: bool,
+    pub format_efi: bool,
     pub bootloader_type: String,
     pub swap_strategy: SwapStrategy,
     pub btrfs_flat: bool,
@@ -202,6 +220,7 @@ pub fn build_partitions(
     filesystem: &str,
     want_efi: bool,
     swap_strategy: SwapStrategy,
+    format_efi: bool,
 ) -> Result<Vec<Partition>, Vec<FieldError>> {
     let mut errors = Vec::new();
     let mut partitions = Vec::new();
@@ -229,7 +248,7 @@ pub fn build_partitions(
                 dev: dev.clone(),
                 point: "/boot/efi".to_string(),
                 fs: "vfat".to_string(),
-                format: true,
+                format: format_efi,
             }),
         }
     }
@@ -258,6 +277,19 @@ pub fn build_partitions(
             fs: filesystem.to_string(),
             format: false,
         });
+    }
+
+    let mut assigned = std::collections::HashSet::new();
+    for partition in &partitions {
+        if !assigned.insert(&partition.dev) {
+            errors.push((
+                "partitions".to_string(),
+                format!(
+                    "{} is assigned to more than one mount point.",
+                    partition.dev
+                ),
+            ));
+        }
     }
 
     if errors.is_empty() {
@@ -384,6 +416,7 @@ pub fn build_config(
         &disk.filesystem,
         disk.want_efi,
         disk.swap_strategy,
+        disk.format_efi,
     )?;
 
     let root_dev = disk.raw_parts.root.as_ref().unwrap();
@@ -468,6 +501,7 @@ mod tests {
             raw_parts: efi_parts(),
             filesystem: "ext4".to_string(),
             want_efi: true,
+            format_efi: false,
             bootloader_type: "grub".to_string(),
             swap_strategy: SwapStrategy::None,
             btrfs_flat: false,
@@ -534,8 +568,14 @@ mod tests {
 
     #[test]
     fn build_partitions_requires_root() {
-        let err = build_partitions(&RawPartitions::default(), "ext4", false, SwapStrategy::None)
-            .unwrap_err();
+        let err = build_partitions(
+            &RawPartitions::default(),
+            "ext4",
+            false,
+            SwapStrategy::None,
+            false,
+        )
+        .unwrap_err();
         assert_eq!(err[0].0, "root");
     }
 
@@ -545,7 +585,7 @@ mod tests {
             root: Some("/dev/sda2".to_string()),
             ..Default::default()
         };
-        let err = build_partitions(&raw, "ext4", true, SwapStrategy::None).unwrap_err();
+        let err = build_partitions(&raw, "ext4", true, SwapStrategy::None, false).unwrap_err();
         assert_eq!(err[0].0, "efi");
     }
 
@@ -557,7 +597,7 @@ mod tests {
             swap: Some("/dev/sda3".to_string()),
             home: Some("/dev/sda4".to_string()),
         };
-        let parts = build_partitions(&raw, "ext4", true, SwapStrategy::Partition).unwrap();
+        let parts = build_partitions(&raw, "ext4", true, SwapStrategy::Partition, true).unwrap();
         assert_eq!(parts.len(), 4);
         assert_eq!(parts[0].point, "/");
         assert!(parts[0].format);
@@ -702,6 +742,7 @@ mod tests {
             raw_parts: efi_parts(),
             filesystem: "ext4".to_string(),
             want_efi: true,
+            format_efi: false,
             swap_strategy: SwapStrategy::None,
             bootloader_type: "grub".to_string(),
             btrfs_flat: false,

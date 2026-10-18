@@ -27,7 +27,9 @@ Disks, and Review.
   run in name order with `TARGETDIR`, `INIT_SYSTEM` and `CONF_FILE` set; they must be owned by root and not
   writable by others, and a failing hook stops the install unless its name ends in `.optional`.
 - No cancelling mid-install: once partitioning starts the window cannot be closed until the install ends.
-- Bootloaders: GRUB, Limine, rEFInd (with the RONBM theme).
+- Bootloaders: rEFInd by default on UEFI, GRUB on BIOS (with the RONBM theme). Limine remains supported by the backend while its installer path is tested further, but is hidden from the UI.
+- Disk encryption is not offered in the UI while LUKS support is tested further.
+- Voyage removes `cryptsetup` from the installed system and rebuilds its initramfs without crypt modules.
 - Drivers: [voidhw](https://github.com/mendescotta/voidhw) detects the hardware and installs the right GPU driver, firmware, microcode and VM guest tools. The initramfs can be generic (any hardware) or targeted (this machine only).
 - Plain GTK4 by default; `--features adwaita` builds with libadwaita.
 - `voyage --demo` opens the UI without installing to any disk.

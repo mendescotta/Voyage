@@ -202,17 +202,59 @@ impl WelcomePage {
     }
 }
 
-fn status_icon(level: Level) -> gtk::Image {
-    let (name, class) = match level {
-        Level::Ok => ("emblem-ok-symbolic", "success"),
-        Level::Warn => ("dialog-warning-symbolic", "warning"),
-        Level::Fail => ("dialog-error-symbolic", "error"),
+fn status_icon(level: Level) -> gtk::DrawingArea {
+    let (color, label) = match level {
+        Level::Ok => ((0.55, 0.76, 0.49), "System check passed"),
+        Level::Warn => ((0.85, 0.65, 0.34), "System check warning"),
+        Level::Fail => ((0.92, 0.41, 0.38), "System check failed"),
     };
-    gtk::Image::builder()
-        .icon_name(name)
-        .css_classes([class])
+    let icon = gtk::DrawingArea::builder()
+        .content_width(20)
+        .content_height(20)
         .valign(gtk::Align::Center)
-        .build()
+        .build();
+    icon.set_tooltip_text(Some(label));
+    icon.set_draw_func(move |_, cr, width, height| {
+        let cx = f64::from(width) / 2.0;
+        let cy = f64::from(height) / 2.0;
+        cr.set_source_rgb(color.0, color.1, color.2);
+        cr.set_line_width(2.0);
+        cr.set_line_cap(gtk::cairo::LineCap::Round);
+        cr.set_line_join(gtk::cairo::LineJoin::Round);
+
+        match level {
+            Level::Ok => {
+                cr.arc(cx, cy, 8.0, 0.0, std::f64::consts::TAU);
+                let _ = cr.stroke();
+                cr.move_to(cx - 4.0, cy);
+                cr.line_to(cx - 1.0, cy + 3.0);
+                cr.line_to(cx + 5.0, cy - 4.0);
+                let _ = cr.stroke();
+            }
+            Level::Warn => {
+                cr.move_to(cx, cy - 8.0);
+                cr.line_to(cx + 8.0, cy + 7.0);
+                cr.line_to(cx - 8.0, cy + 7.0);
+                cr.close_path();
+                let _ = cr.stroke();
+                cr.move_to(cx, cy - 3.0);
+                cr.line_to(cx, cy + 2.0);
+                let _ = cr.stroke();
+                cr.arc(cx, cy + 5.0, 0.7, 0.0, std::f64::consts::TAU);
+                let _ = cr.fill();
+            }
+            Level::Fail => {
+                cr.arc(cx, cy, 8.0, 0.0, std::f64::consts::TAU);
+                let _ = cr.stroke();
+                cr.move_to(cx - 3.0, cy - 3.0);
+                cr.line_to(cx + 3.0, cy + 3.0);
+                cr.move_to(cx + 3.0, cy - 3.0);
+                cr.line_to(cx - 3.0, cy + 3.0);
+                let _ = cr.stroke();
+            }
+        }
+    });
+    icon
 }
 
 fn apply_network_timezone(

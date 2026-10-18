@@ -97,7 +97,7 @@ check "zsh comes from its package"      "$(distro_shell_info zsh)" "/usr/bin/zsh
 check "fish comes from fish-shell"      "$(distro_shell_info fish)" "/usr/bin/fish fish-shell"
 check "VirtualBox guest packages"       "$(distro_values vbox-guest-install | tr '\n' ' ')" "virtualbox-ose-guest-dkms virtualbox-ose-guest "
 check "VirtualBox guest services"       "$(distro_values vbox-guest-enable | tr '\n' ' ')" "vboxservice "
-check "installer-only packages are unchanged" "$(distro_values remove | tr '\n' ' ')" "voyage xmirror dialog xtools-minimal "
+check "installer and encryption packages are removed" "$(distro_values remove | tr '\n' ' ')" "voyage xmirror dialog xtools-minimal cryptsetup "
 
 # ---- hooks
 H="$T/hooks"; OUT="$T/out"; export OUT; mkdir -p "$H/post-copy" "$T/etc-hooks/post-copy"

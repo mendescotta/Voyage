@@ -17,8 +17,7 @@ pub const TITLE: &str = "Disks";
 
 const FILESYSTEMS: &[&str] = &["ext4", "btrfs", "ext3", "ext2", "xfs"];
 const BIOS_BOOTLOADERS: &[(&str, &str)] = &[("GRUB", "grub")];
-const EFI_BOOTLOADERS: &[(&str, &str)] =
-    &[("rEFInd", "refind"), ("GRUB", "grub"), ("Limine", "limine")];
+const EFI_BOOTLOADERS: &[(&str, &str)] = &[("rEFInd", "refind"), ("GRUB", "grub")];
 
 struct State {
     disks: Vec<Disk>,
@@ -34,6 +33,7 @@ pub struct DisksPage {
     swap_row: ComboRow,
     home_row: ComboRow,
     filesys_row: ComboRow,
+    efi_format_row: SwitchRow,
     btrfs_flat_row: SwitchRow,
     btrfs_snapshots_row: SwitchRow,
     bootloader_row: ComboRow,
@@ -116,9 +116,12 @@ impl DisksPage {
         let swap_row = ComboRow::new("Swap partition", &[]);
         swap_row.set_visible(false);
         let home_row = ComboRow::new("Home (/home)", &[]);
+        let efi_format_row = SwitchRow::new("Format EFI partition");
+        efi_format_row.set_subtitle("Off preserves existing boot files on a shared EFI partition.");
         manual_group.add(&root_row);
         if is_efi {
             manual_group.add(&efi_row);
+            manual_group.add(&efi_format_row);
         }
         manual_group.add(&swap_strategy_row);
         manual_group.add(&swap_row);
@@ -207,6 +210,7 @@ impl DisksPage {
             swap_row,
             home_row,
             filesys_row,
+            efi_format_row,
             btrfs_flat_row,
             btrfs_snapshots_row,
             bootloader_row,
@@ -268,6 +272,8 @@ impl DisksPage {
             let layout_row = layout_row.clone();
             let shred_row = shred_row.clone();
             let swap_strategy_row_outer = page.swap_strategy_row.clone();
+            let efi_format_row_outer = page.efi_format_row.clone();
+            let is_efi = page.is_efi;
             let state = page.state.clone();
             let (root_row_w, efi_row_w, swap_row_w, home_row_w) = (
                 page.root_row.clone(),
@@ -300,6 +306,7 @@ impl DisksPage {
                 let (root_row_w, efi_row_w, swap_row_w, home_row_w) =
                     (root_row_w.clone(), efi_row_w.clone(), swap_row_w.clone(), home_row_w.clone());
                 let swap_strategy_row = swap_strategy_row_outer.clone();
+                let efi_format_row = efi_format_row_outer.clone();
                 let auto_button = button.clone();
                 let error_anchor = button.clone();
                 widgets::confirm(button, "Warning: automatic partitioning", &body, "Continue", move || {
@@ -329,6 +336,9 @@ impl DisksPage {
 
                         match result {
                             Ok(Ok(output)) if output.status.success() => {
+                                if is_efi {
+                                    efi_format_row.set_active(true);
+                                }
                                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                                 let created = |key: &str| partition_from_output(&stdout, key);
                                 let (swap_partition, root_partition, efi_partition) =
@@ -367,17 +377,38 @@ impl DisksPage {
             let swap_row = page.swap_row.clone();
             let home_row = page.home_row.clone();
             gparted_button.connect_clicked(move |button| {
-                if Command::new("gparted").status().is_err() {
-                    widgets::alert(button, "Error", "gparted is not installed.");
-                    return;
-                }
-                let mut state_mut = state.borrow_mut();
-                state_mut.partitions = system_detect::get_partitions_detailed();
-                let options = partition_options(&state_mut.partitions);
-                drop(state_mut);
-                for row in [&root_row, &efi_row, &swap_row, &home_row] {
-                    row.set_items(&options);
-                }
+                let mut child = match Command::new("gparted-pkexec").spawn() {
+                    Ok(child) => child,
+                    Err(_) => {
+                        widgets::alert(
+                            button,
+                            "Error",
+                            "GParted's privileged launcher is unavailable.",
+                        );
+                        return;
+                    }
+                };
+                let (tx, rx) = async_channel::bounded(1);
+                thread::spawn(move || {
+                    let _ = tx.send_blocking(child.wait());
+                });
+                let state = state.clone();
+                let (root_row, efi_row, swap_row, home_row) = (
+                    root_row.clone(),
+                    efi_row.clone(),
+                    swap_row.clone(),
+                    home_row.clone(),
+                );
+                glib::spawn_future_local(async move {
+                    let _ = rx.recv().await;
+                    let mut state_mut = state.borrow_mut();
+                    state_mut.partitions = system_detect::get_partitions_detailed();
+                    let options = partition_options(&state_mut.partitions);
+                    drop(state_mut);
+                    for row in [&root_row, &efi_row, &swap_row, &home_row] {
+                        row.set_items(&options);
+                    }
+                });
             });
         }
 
@@ -473,6 +504,7 @@ impl DisksPage {
                 raw_parts,
                 filesystem,
                 want_efi: self.is_efi,
+                format_efi: self.efi_format_row.is_active(),
                 bootloader_type,
                 swap_strategy: match self.swap_strategy_row.selected() {
                     1 => SwapStrategy::Partition,
@@ -509,7 +541,15 @@ fn select_partition(row: &ComboRow, partitions: &[PartitionDetail], name: &str) 
 
 #[cfg(test)]
 mod tests {
-    use super::partition_from_output;
+    use super::{partition_from_output, BIOS_BOOTLOADERS, EFI_BOOTLOADERS};
+
+    #[test]
+    fn ui_bootloader_choices_keep_refind_default_and_hide_limine() {
+        assert_eq!(BIOS_BOOTLOADERS, &[("GRUB", "grub")]);
+        assert_eq!(EFI_BOOTLOADERS[0], ("rEFInd", "refind"));
+        assert!(EFI_BOOTLOADERS.iter().any(|(_, id)| *id == "refind"));
+        assert!(!EFI_BOOTLOADERS.iter().any(|(_, id)| *id == "limine"));
+    }
 
     #[test]
     fn reads_created_partitions_from_the_script_output() {
