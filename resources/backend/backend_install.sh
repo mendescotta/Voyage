@@ -346,13 +346,6 @@ copy_rootfs() {
     fi
 
     cp "$TARGETDIR"/etc/skel/.[!.]* "$TARGETDIR/root/" 2>/dev/null
-
-    PAM_FILES="$TARGETDIR/etc/pam.d/su $TARGETDIR/etc/pam.d/login"
-    for file in $PAM_FILES; do
-        if [ -f "$file" ]; then
-            sed -i 's/^auth\s\+sufficient\s\+pam_rootok\.so/#auth sufficient pam_rootok.so/' "$file"
-        fi
-    done 
 }
 
 mount_filesystems() {
@@ -877,19 +870,23 @@ ensure_package() {
         chroot "$TARGETDIR" xbps-install -Sy "$1" || die "Error installing $1"
 }
 
+set_grub_var() {
+    local file="$TARGETDIR/etc/default/grub"
+    if grep -q "^$1=" "$file"; then
+        sed -i "s|^$1=.*|$1=$2|" "$file"
+    else
+        printf '%s=%s\n' "$1" "$2" >> "$file"
+    fi
+}
+
 install_grub() {
     local dev="$1" grub_args=""
 
     install -d "$TARGETDIR/etc/default"
-    if [ -f "$TARGETDIR/etc/default/grub" ]; then
-        if grep -q '^GRUB_DISTRIBUTOR=' "$TARGETDIR/etc/default/grub"; then
-            sed -i 's|^GRUB_DISTRIBUTOR=.*|GRUB_DISTRIBUTOR="Void"|' "$TARGETDIR/etc/default/grub"
-        else
-            printf '\nGRUB_DISTRIBUTOR="Void"\n' >> "$TARGETDIR/etc/default/grub"
-        fi
-    else
-        printf 'GRUB_DISTRIBUTOR="Void"\n' > "$TARGETDIR/etc/default/grub"
-    fi
+    touch "$TARGETDIR/etc/default/grub"
+    set_grub_var GRUB_DISTRIBUTOR '"Void"'
+    # Void defaults to a 5 s menu on every boot; 1 s still allows a choice.
+    set_grub_var GRUB_TIMEOUT 1
 
     if [ -n "$EFI_SYSTEM" ]; then
         grub_args="--target=$EFI_TARGET --efi-directory=/boot/efi --bootloader-id=Void --recheck"
