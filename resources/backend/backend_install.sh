@@ -379,6 +379,16 @@ set_hostname() {
     echo "${hostname:-void}" > "$TARGETDIR/etc/hostname"
 }
 
+# copy_rootfs copies the live system's machine-id, which every installation from the
+# same image would then share. Give the new system its own; dbus reads the same value.
+set_machine_id() {
+    rm -f "$TARGETDIR/etc/machine-id" "$TARGETDIR/var/lib/dbus/machine-id"
+    sed 's/-//g' /proc/sys/kernel/random/uuid > "$TARGETDIR/etc/machine-id"
+    chmod 0444 "$TARGETDIR/etc/machine-id"
+    install -d "$TARGETDIR/var/lib/dbus"
+    ln -s /etc/machine-id "$TARGETDIR/var/lib/dbus/machine-id"
+}
+
 set_timezone() {
     local TIMEZONE="$(get_option TIMEZONE)"
     ln -sf "/usr/share/zoneinfo/${TIMEZONE}" "${TARGETDIR}/etc/localtime"
@@ -1057,6 +1067,7 @@ set_keymap
 set_locale
 set_timezone
 set_hostname
+set_machine_id
 
 set_mirror
 install_extra_software
