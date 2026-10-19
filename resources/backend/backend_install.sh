@@ -346,6 +346,12 @@ copy_rootfs() {
     fi
 
     cp "$TARGETDIR"/etc/skel/.[!.]* "$TARGETDIR/root/" 2>/dev/null
+
+    # The live ISO's no-sleep/no-lock dconf defaults are for the live session only.
+    rm -rf "$TARGETDIR/etc/dconf/db/live" "$TARGETDIR/etc/dconf/db/live.d"
+    for profile in "$TARGETDIR"/etc/dconf/profile/*; do
+        [ -f "$profile" ] && sed -i '/^system-db:live$/d' "$profile"
+    done
 }
 
 mount_filesystems() {
