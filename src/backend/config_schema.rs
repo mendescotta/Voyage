@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use super::desktop::NONE;
+
 const BIOS_BOOT_PARTTYPE_GUID: &str = "21686148-6449-6e6f-744e-656f656e7451";
 
 pub type FieldError = (String, String);
@@ -59,6 +61,11 @@ pub struct InstallFields {
     /// Login shell names from distro.conf; empty means the distro's default.
     pub user_shell: String,
     pub root_shell: String,
+    /// Desktop and login manager names from distro.conf, or "none"; empty leaves the copied system's.
+    pub desktop: String,
+    /// Keep the live image's desktop next to another chosen one.
+    pub keep_desktop: bool,
+    pub login_manager: String,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +79,9 @@ pub struct InstallConfig {
     pub userpassword: String,
     pub rootpassword: String,
     pub usergroups: String,
+    pub desktop: String,
+    pub keep_desktop: bool,
+    /// The login manager's name, or "none" (the backend's DISPLAYMANAGER).
     pub display_manager: String,
     pub autologin: bool,
     pub mirror: String,
@@ -338,7 +348,6 @@ fn validate_bootloader_choice(disk: &DiskChoices) -> Result<(), FieldError> {
 pub fn build_config(
     fields: &InstallFields,
     disk: &DiskChoices,
-    display_manager: &str,
 ) -> Result<InstallConfig, Vec<FieldError>> {
     let mut errors = Vec::new();
 
@@ -387,12 +396,28 @@ pub fn build_config(
         ("usershell", "User shell", &fields.user_shell),
         ("rootshell", "Root shell", &fields.root_shell),
     ] {
-        if !shell.is_empty() && !super::distro::shell_name_valid(shell) {
+        if !shell.is_empty() && !super::distro::name_valid(shell) {
             errors.push((
                 key.to_string(),
                 format!("{label} is not a valid shell name."),
             ));
         }
+    }
+
+    for (key, label, name) in [
+        ("desktop", "Desktop", &fields.desktop),
+        ("loginmanager", "Login manager", &fields.login_manager),
+    ] {
+        if !name.is_empty() && !super::distro::name_valid(name) {
+            errors.push((key.to_string(), format!("{label} is not a valid name.")));
+        }
+    }
+    let no_login_manager = fields.login_manager.is_empty() || fields.login_manager == NONE;
+    if fields.desktop == NONE && !no_login_manager {
+        errors.push((
+            "loginmanager".to_string(),
+            "A login manager needs a desktop.".to_string(),
+        ));
     }
 
     for (key, label, pwd) in [
@@ -443,8 +468,11 @@ pub fn build_config(
         userpassword: fields.userpassword.clone(),
         rootpassword: fields.rootpassword.clone(),
         usergroups: "wheel,audio,video,users,network,optical,cdrom".to_string(),
-        display_manager: display_manager.to_string(),
-        autologin: fields.autologin,
+        desktop: fields.desktop.clone(),
+        keep_desktop: fields.keep_desktop && fields.desktop != NONE,
+        display_manager: fields.login_manager.clone(),
+        // autologin goes through the login manager; there is none to do it
+        autologin: fields.autologin && !no_login_manager,
         mirror: mirror_key.to_string(),
         update: mirror_key != "Local" && fields.net,
         nonfree: fields.nonfree,
@@ -484,6 +512,9 @@ mod tests {
             driver_set: DriverSet::Generic,
             user_shell: "bash".to_string(),
             root_shell: "bash".to_string(),
+            desktop: "xfce".to_string(),
+            keep_desktop: false,
+            login_manager: "lightdm".to_string(),
         }
     }
 
@@ -609,7 +640,7 @@ mod tests {
     fn build_config_rejects_missing_required_fields() {
         let mut fields = valid_fields();
         fields.hostname = String::new();
-        let err = build_config(&fields, &efi_disk_choices(), "").unwrap_err();
+        let err = build_config(&fields, &efi_disk_choices()).unwrap_err();
         assert!(err.iter().any(|(k, _)| k == "hostname"));
     }
 
@@ -617,7 +648,7 @@ mod tests {
     fn build_config_rejects_password_mismatch_whitespace() {
         let mut fields = valid_fields();
         fields.userpassword = " leading".to_string();
-        let err = build_config(&fields, &efi_disk_choices(), "").unwrap_err();
+        let err = build_config(&fields, &efi_disk_choices()).unwrap_err();
         assert!(err.iter().any(|(k, _)| k == "userpassword"));
     }
 
@@ -634,7 +665,7 @@ mod tests {
             bootloader_type: "limine".to_string(),
             ..Default::default()
         };
-        let err = build_config(&fields, &disk, "").unwrap_err();
+        let err = build_config(&fields, &disk).unwrap_err();
         assert_eq!(err[0].0, "bootloader");
     }
 
@@ -643,7 +674,7 @@ mod tests {
         let fields = valid_fields();
         let mut disk = efi_disk_choices();
         disk.swap_strategy = SwapStrategy::Partition;
-        let err = build_config(&fields, &disk, "").unwrap_err();
+        let err = build_config(&fields, &disk).unwrap_err();
         assert!(err.iter().any(|(k, _)| k == "swap"));
     }
 
@@ -653,7 +684,7 @@ mod tests {
         let mut disk = efi_disk_choices();
         disk.raw_parts.swap = Some("/dev/sda3".to_string());
         disk.swap_strategy = SwapStrategy::Swapfile;
-        let cfg = build_config(&fields, &disk, "").unwrap();
+        let cfg = build_config(&fields, &disk).unwrap();
         assert_eq!(cfg.swap_strategy, "swapfile");
         assert!(!cfg.partitions.iter().any(|p| p.fs == "swap"));
     }
@@ -665,7 +696,7 @@ mod tests {
         disk.filesystem = "btrfs".to_string();
         disk.btrfs_flat = true;
         disk.btrfs_snapshots = false;
-        let cfg = build_config(&fields, &disk, "").unwrap();
+        let cfg = build_config(&fields, &disk).unwrap();
         assert!(cfg.btrfs_flat);
         assert!(!cfg.btrfs_snapshots);
     }
@@ -677,7 +708,7 @@ mod tests {
         disk.filesystem = "btrfs".to_string();
         disk.btrfs_flat = true;
         disk.btrfs_snapshots = true;
-        let cfg = build_config(&fields, &disk, "").unwrap();
+        let cfg = build_config(&fields, &disk).unwrap();
         assert!(
             !cfg.btrfs_snapshots,
             "flat layout has no subvolume boundary for @snapshots"
@@ -718,7 +749,7 @@ mod tests {
     #[test]
     fn build_config_happy_path_efi_grub() {
         let fields = valid_fields();
-        let cfg = build_config(&fields, &efi_disk_choices(), "gdm").unwrap();
+        let cfg = build_config(&fields, &efi_disk_choices()).unwrap();
         assert_eq!(cfg.timezone, "America/New_York");
         assert_eq!(cfg.bootloader_disk, "/dev/sda");
         assert_eq!(cfg.mirror, "Default");
@@ -733,7 +764,7 @@ mod tests {
     fn build_config_local_mirror_never_updates() {
         let mut fields = valid_fields();
         fields.mirror = "Local".to_string();
-        let cfg = build_config(&fields, &efi_disk_choices(), "").unwrap();
+        let cfg = build_config(&fields, &efi_disk_choices()).unwrap();
         assert!(!cfg.update);
     }
 
@@ -748,7 +779,7 @@ mod tests {
             btrfs_flat: false,
             btrfs_snapshots: false,
         };
-        build_config(fields, &disk, "gdm")
+        build_config(fields, &disk)
     }
 
     #[test]
@@ -759,6 +790,63 @@ mod tests {
         let config = built(&fields).unwrap();
         assert_eq!(config.user_shell, "zsh");
         assert_eq!(config.root_shell, "fish");
+    }
+
+    #[test]
+    fn the_desktop_and_login_manager_reach_the_config() {
+        let mut fields = valid_fields();
+        fields.desktop = "kde".to_string();
+        fields.keep_desktop = true;
+        fields.login_manager = "sddm".to_string();
+        fields.autologin = true;
+        let config = built(&fields).unwrap();
+        assert_eq!(config.desktop, "kde");
+        assert!(config.keep_desktop);
+        assert_eq!(config.display_manager, "sddm");
+        assert!(config.autologin);
+    }
+
+    #[test]
+    fn without_a_login_manager_there_is_no_autologin() {
+        let mut fields = valid_fields();
+        fields.login_manager = NONE.to_string();
+        fields.autologin = true;
+        assert!(!built(&fields).unwrap().autologin);
+    }
+
+    #[test]
+    fn no_desktop_means_no_login_manager_and_nothing_to_keep() {
+        let mut fields = valid_fields();
+        fields.desktop = NONE.to_string();
+        let errors = built(&fields).unwrap_err();
+        assert!(errors.iter().any(|(k, _)| k == "loginmanager"));
+        fields.login_manager = NONE.to_string();
+        fields.keep_desktop = true;
+        assert!(!built(&fields).unwrap().keep_desktop);
+    }
+
+    #[test]
+    fn desktop_and_login_manager_names_are_checked() {
+        for bad in ["../x", "-R", "KDE", "a b"] {
+            let mut fields = valid_fields();
+            fields.desktop = bad.to_string();
+            assert!(
+                built(&fields)
+                    .unwrap_err()
+                    .iter()
+                    .any(|(k, _)| k == "desktop"),
+                "{bad}"
+            );
+            let mut fields = valid_fields();
+            fields.login_manager = bad.to_string();
+            assert!(
+                built(&fields)
+                    .unwrap_err()
+                    .iter()
+                    .any(|(k, _)| k == "loginmanager"),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

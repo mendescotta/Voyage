@@ -35,6 +35,9 @@ const PROGRESS_RAMPS: &[(&str, (u8, u8))] = &[
     ("COPY", COPY_RANGE),
     ("UPDATE_DOWNLOAD", (50, 69)),
     ("UPDATE_INSTALL", (60, 69)),
+    // DESKTOP_REMOVE first: tokens are matched by substring
+    ("DESKTOP_REMOVE", (78, 84)),
+    ("DESKTOP", (70, 77)),
 ];
 
 /// `PROGRESS 42` from the backend: how much of the root copy is done, in percent.
@@ -83,6 +86,11 @@ pub fn generate_conf_file(config: &InstallConfig, conf_file: &str) -> std::io::R
         ("USERPASSWORD", config.userpassword.clone()),
         ("ROOTPASSWORD", config.rootpassword.clone()),
         ("USERGROUPS", config.usergroups.clone()),
+        ("DESKTOP", config.desktop.clone()),
+        (
+            "KEEPDESKTOP",
+            if config.keep_desktop { "1" } else { "0" }.to_string(),
+        ),
         ("DISPLAYMANAGER", config.display_manager.clone()),
         (
             "AUTOLOGIN",
@@ -299,7 +307,9 @@ mod tests {
             userpassword: "hunter2".to_string(),
             rootpassword: "hunter2root".to_string(),
             usergroups: "wheel,audio,video,users,network,optical,cdrom".to_string(),
-            display_manager: "gdm".to_string(),
+            desktop: "kde".to_string(),
+            keep_desktop: true,
+            display_manager: "sddm".to_string(),
             autologin: false,
             mirror: "Default".to_string(),
             update: true,
@@ -350,6 +360,9 @@ mod tests {
         assert!(content.contains("BTRFS_SNAPSHOTS 0\n"));
         assert!(content.contains("USERSHELL zsh\n"));
         assert!(content.contains("ROOTSHELL bash\n"));
+        assert!(content.contains("DESKTOP kde\n"));
+        assert!(content.contains("KEEPDESKTOP 1\n"));
+        assert!(content.contains("DISPLAYMANAGER sddm\n"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -540,6 +540,50 @@ pub fn detect_locales() -> Vec<String> {
     locales
 }
 
+/// The names of the packages the live system has (`xbps-query -l`); empty where xbps is not available.
+pub fn installed_packages() -> HashSet<String> {
+    Command::new("xbps-query")
+        .arg("-l")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| parse_package_list(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
+/// `ii gnome-shell-51.1_4 description` lines: the name is the pkgver without its last `-version_revision`.
+fn parse_package_list(text: &str) -> HashSet<String> {
+    text.lines()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .filter_map(|pkgver| pkgver.rsplit_once('-').map(|(name, _)| name.to_string()))
+        .collect()
+}
+
+/// The repository URLs in xbps.d (/etc first, then /usr/share), as `repository=` lines give them.
+pub fn configured_repositories() -> Vec<String> {
+    let mut urls = Vec::new();
+    for dir in ["/etc/xbps.d", "/usr/share/xbps.d"] {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if let Ok(text) = fs::read_to_string(entry.path()) {
+                urls.extend(parse_repositories(&text));
+            }
+        }
+    }
+    urls
+}
+
+fn parse_repositories(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("repository"))
+        .filter_map(|rest| rest.trim_start().strip_prefix('='))
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .collect()
+}
+
 pub fn detect_display_manager() -> Option<String> {
     let runit_services: &[(&str, &str)] = &[
         ("/var/service/greetd", "greetd"),
@@ -588,6 +632,25 @@ pub fn detect_timezone_from_network(timeout: Duration) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repositories_come_from_repository_lines() {
+        let urls = parse_repositories(
+            "ignorepkg=x\nrepository=https://a/repo\n  repository = https://b \n#repository=https://c\n",
+        );
+        assert_eq!(urls, ["https://a/repo", "https://b"]);
+    }
+
+    #[test]
+    fn package_names_come_from_the_pkgver() {
+        let names = parse_package_list(
+            "ii gnome-shell-51.1_4 GNOME core\nii xfce4-session-4.20.2_1 x\nuu x-1.0_1 y\n\n",
+        );
+        assert!(names.contains("gnome-shell"));
+        assert!(names.contains("xfce4-session"));
+        assert!(names.contains("x"));
+        assert_eq!(names.len(), 3);
+    }
 
     #[test]
     fn parses_size_strings() {

@@ -4,6 +4,7 @@ use gtk::glib;
 
 use crate::backend::config_schema::DriverSet;
 use crate::backend::hardware;
+use crate::ui::pages::desktop::DesktopGroup;
 use crate::ui::widgets::{ComboRow, Group, SwitchRow};
 use crate::ui::SysData;
 
@@ -24,6 +25,7 @@ pub struct MirrorsPage {
     nonfree_row: SwitchRow,
     hw_row: SwitchRow,
     driver_set_row: ComboRow,
+    desktop: DesktopGroup,
     net: bool,
 }
 
@@ -66,6 +68,18 @@ impl MirrorsPage {
         boot_group.add(&driver_set_row);
         widget.append(boot_group.as_ref());
 
+        // another desktop than the live image's comes from the network: not with the local ISO mirror
+        let online =
+            |row: &ComboRow, net: bool| net && MIRRORS[row.selected() as usize].1 != "Local";
+        let desktop = DesktopGroup::new(sys_data, online(&mirror_row, sys_data.net));
+        widget.append(desktop.group.as_ref());
+        widget.append(desktop.hint());
+        {
+            let desktop = desktop.clone();
+            let net = sys_data.net;
+            mirror_row.connect_selected(move |row| desktop.set_online(online(row, net)));
+        }
+
         // voidhw reads sysfs only, but run it off the UI thread anyway.
         let (tx, rx) = async_channel::bounded::<Option<hardware::HardwarePlan>>(1);
         std::thread::spawn(move || {
@@ -91,13 +105,23 @@ impl MirrorsPage {
             nonfree_row,
             hw_row,
             driver_set_row,
+            desktop,
             net: sys_data.net,
         }
     }
 
+    /// `f` is told the chosen login manager's label (None for none), now and on every change.
+    pub fn connect_login_manager_changed(&self, f: impl Fn(Option<&str>) + 'static) {
+        self.desktop.connect_login_manager_changed(f);
+    }
+
     pub fn collect(&self) -> (MirrorsFields, Vec<(String, String)>) {
         let key = MIRRORS[self.mirror_row.selected() as usize].1.to_string();
+        let desktop = self.desktop.collect();
         let fields = MirrorsFields {
+            desktop: desktop.desktop,
+            keep_desktop: desktop.keep_desktop,
+            login_manager: desktop.login_manager,
             mirror: key,
             net: self.net,
             nonfree: self.nonfree_row.is_active(),
@@ -119,4 +143,7 @@ pub struct MirrorsFields {
     pub nonfree: bool,
     pub hw_drivers: bool,
     pub driver_set: DriverSet,
+    pub desktop: String,
+    pub keep_desktop: bool,
+    pub login_manager: String,
 }

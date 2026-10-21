@@ -61,6 +61,7 @@ pub fn build(app: &widgets::App, sys_data: SysData, demo: bool) -> Window {
     let welcome = WelcomePage::new(&sys_data);
     let mirrors = MirrorsPage::new(&sys_data);
     let users = UsersPage::new(&sys_data);
+    mirrors.connect_login_manager_changed(users.login_manager_handler());
     let disks = DisksPage::new(&sys_data);
     let review = ReviewPage::new();
     let installation = InstallationPage::new();
@@ -514,13 +515,12 @@ fn collect_all(
         driver_set: mirrors_fields.driver_set,
         user_shell: users_fields.user_shell,
         root_shell: users_fields.root_shell,
+        desktop: mirrors_fields.desktop,
+        keep_desktop: mirrors_fields.keep_desktop,
+        login_manager: mirrors_fields.login_manager,
     };
 
-    build_config(
-        &fields,
-        &disk_choices,
-        s.sys_data.display_manager.as_deref().unwrap_or(""),
-    )
+    build_config(&fields, &disk_choices)
 }
 
 fn start_install(state: &Rc<RefCell<State>>) {

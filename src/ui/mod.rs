@@ -20,7 +20,12 @@ pub const STYLE_CSS: &str = include_str!("style.css");
 pub struct SysData {
     pub efi: bool,
     pub net: bool,
+    /// The login manager the live image runs, which the Login manager menu starts on.
     pub display_manager: Option<String>,
+    /// The live image's packages: what it ships tells its desktop, and what an offline install can use.
+    pub packages: std::collections::HashSet<String>,
+    /// The repository URLs the live image's xbps.d configures (some desktops need a particular one).
+    pub repositories: Vec<String>,
     /// The Welcome page's system check; a failed required one blocks the installation.
     pub checks: Vec<crate::backend::requirements::Check>,
 }

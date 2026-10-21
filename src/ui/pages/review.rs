@@ -1,6 +1,8 @@
 use gtk::prelude::*;
 
 use crate::backend::config_schema::{InstallConfig, Partition};
+use crate::backend::desktop::{self, NONE};
+use crate::backend::distro::DistroConf;
 use crate::ui::widgets::{ActionRow, Group};
 
 pub const TITLE: &str = "Review";
@@ -25,9 +27,10 @@ pub fn review_rows(config: &InstallConfig) -> Vec<(String, String)> {
             "Root password".to_string(),
             password_state(&config.rootpassword),
         ),
+        ("Desktop".to_string(), desktop_label(config)),
         (
-            "Display manager".to_string(),
-            display_manager_label(&config.display_manager),
+            "Login manager".to_string(),
+            login_manager_label(&config.display_manager),
         ),
         ("Auto login".to_string(), yes_no(config.autologin)),
         ("Mirror".to_string(), config.mirror.clone()),
@@ -77,7 +80,7 @@ pub fn edit_page(label: &str) -> Option<usize> {
         "Computer name" | "User account" | "User shell" | "Root shell" | "User password"
         | "Root password" | "Auto login" => Some(USERS),
         "Mirror" | "System updates" | "Nonfree repository" | "Hardware drivers"
-        | "Initramfs drivers" => Some(MIRRORS),
+        | "Initramfs drivers" | "Desktop" | "Login manager" => Some(MIRRORS),
         "Disk layout" | "Swap" | "Filesystem" | "Btrfs layout" | "Bootloader" => Some(DISKS),
         _ => None,
     }
@@ -91,11 +94,38 @@ fn shell_label(name: &str) -> String {
     }
 }
 
-fn display_manager_label(display_manager: &str) -> String {
-    if display_manager.is_empty() {
-        "None".to_string()
-    } else {
-        display_manager.to_string()
+/// The label distro.conf gives the chosen desktop, and whether the live image's stays next to it.
+fn desktop_label(config: &InstallConfig) -> String {
+    let conf = DistroConf::load();
+    let label = |name: &str| {
+        conf.desktops
+            .iter()
+            .find(|d| d.name == name)
+            .map_or_else(|| name.to_string(), |d| d.label.clone())
+    };
+    match config.desktop.as_str() {
+        "" => "As on the live image".to_string(),
+        NONE => "None (console only)".to_string(),
+        name if config.keep_desktop => {
+            let installed = crate::backend::system_detect::installed_packages();
+            match desktop::shipped(&conf, &installed) {
+                Some(shipped) => format!("{}, keeping {}", label(name), shipped.label),
+                None => label(name),
+            }
+        }
+        name => label(name),
+    }
+}
+
+fn login_manager_label(name: &str) -> String {
+    match name {
+        "" => "As on the live image".to_string(),
+        NONE => "None (console login)".to_string(),
+        name => DistroConf::load()
+            .login_managers
+            .iter()
+            .find(|m| m.name == name)
+            .map_or_else(|| name.to_string(), |m| m.label()),
     }
 }
 
@@ -259,7 +289,9 @@ mod tests {
             userpassword: "hunter2".to_string(),
             rootpassword: "".to_string(),
             usergroups: "wheel".to_string(),
-            display_manager: "gdm".to_string(),
+            desktop: "kde".to_string(),
+            keep_desktop: false,
+            display_manager: "sddm".to_string(),
             autologin: false,
             mirror: "Default".to_string(),
             update: true,
@@ -318,7 +350,8 @@ mod tests {
     fn review_rows_includes_every_collected_choice() {
         let rows = review_rows(&sample_config());
         for key in [
-            "Display manager",
+            "Desktop",
+            "Login manager",
             "Auto login",
             "Nonfree repository",
             "Hardware drivers",
@@ -326,6 +359,24 @@ mod tests {
         ] {
             assert!(rows.iter().any(|(k, _)| k == key), "missing row: {key}");
         }
+    }
+
+    #[test]
+    fn desktop_and_login_manager_rows_use_the_distro_labels() {
+        let mut config = sample_config();
+        let row = |config: &InstallConfig, key: &str| {
+            review_rows(config)
+                .into_iter()
+                .find(|(k, _)| k == key)
+                .unwrap()
+                .1
+        };
+        assert_eq!(row(&config, "Desktop"), "KDE Plasma");
+        assert_eq!(row(&config, "Login manager"), "SDDM");
+        config.desktop = NONE.to_string();
+        config.display_manager = NONE.to_string();
+        assert_eq!(row(&config, "Desktop"), "None (console only)");
+        assert_eq!(row(&config, "Login manager"), "None (console login)");
     }
 
     #[test]
@@ -351,8 +402,7 @@ mod tests {
                 None => read_only.push(label.as_str()),
             }
         }
-        // the only choice the user cannot change here is the one detected from the live system
-        assert_eq!(read_only, vec!["Display manager"]);
+        assert!(read_only.is_empty(), "{read_only:?}");
     }
 
     #[test]
@@ -365,6 +415,8 @@ mod tests {
         assert_eq!(edit_page("Root shell"), Some(USERS));
         assert_eq!(edit_page("Hardware drivers"), Some(MIRRORS));
         assert_eq!(edit_page("Bootloader"), Some(DISKS));
+        assert_eq!(edit_page("Desktop"), Some(MIRRORS));
+        assert_eq!(edit_page("Login manager"), Some(MIRRORS));
         assert_eq!(edit_page("Something new"), None);
     }
 

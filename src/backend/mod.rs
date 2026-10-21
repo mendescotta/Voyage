@@ -1,4 +1,5 @@
 pub mod config_schema;
+pub mod desktop;
 pub mod distro;
 pub mod hardware;
 pub mod install_runner;

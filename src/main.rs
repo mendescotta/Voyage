@@ -42,6 +42,8 @@ fn detect_system_data() -> SysData {
         efi: system_detect::detect_efi(),
         net,
         display_manager: system_detect::detect_display_manager(),
+        packages: system_detect::installed_packages(),
+        repositories: system_detect::configured_repositories(),
         checks,
     }
 }

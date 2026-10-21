@@ -11,6 +11,15 @@
 #   install <package>...                           extra packages for the new system (online installs only)
 #   remove <package>...                            packages removed from the new system (the installer itself)
 #   enable <service>...  /  disable <service>...   services of the new system, by the init's own names
+#   desktop <name> <session> <login manager> <label...>   a desktop the installer offers (session: its .desktop name)
+#   desktop-packages <name> <package>...           what installs it; the first package tells whether a system has it
+#   desktop-official <name>...                     installed from Void's own repositories only, then repolocked
+#   desktop-repository <name> <word>               offered only when a configured repository URL contains <word>
+#   login-manager <name> <package>...              a login manager (also its service name) and its packages
+#   login-manager-services <name> <service>...     its services when it needs more than its own, in start order
+#   login-manager-needs <name> <desktop>...        offered only when the new system has one of these desktops
+#   headless-remove <package>...                   also removed for an install without a desktop
+# "none" is reserved: it is how the installer says "no desktop" and "no login manager".
 
 DISTRO_CONF_OVERRIDE="${DISTRO_CONF_OVERRIDE:-/etc/voyage/distro.conf}"
 HOOKS_TRUSTED_UID="${HOOKS_TRUSTED_UID:-0}"
@@ -55,6 +64,53 @@ distro_shell_info() {
         END { exit (found ? 0 : 1) }' "$f"
 }
 
+# the second word of every <key> line, one per line, in file order (desktop and login-manager names)
+distro_names() {
+    local f
+    f="$(distro_conf_file)"
+    [ -f "$f" ] || return 0
+    awk -v key="$1" '{ sub(/#.*/, "") } $1 == key && NF >= 2 { print $2 }' "$f"
+}
+
+# the words after `<key> <name>`, one per line, across all such lines
+distro_named_values() {
+    local f
+    f="$(distro_conf_file)"
+    [ -f "$f" ] || return 0
+    awk -v key="$1" -v name="$2" '{ sub(/#.*/, "") } $1 == key && $2 == name { for (i = 3; i <= NF; i++) print $i }' "$f"
+}
+
+# field <n> (1 = session, 2 = login manager) of a desktop line; fails when the desktop is not defined
+distro_desktop_field() {
+    local f
+    f="$(distro_conf_file)"
+    [ -f "$f" ] || return 1
+    awk -v name="$1" -v n="$2" '
+        { sub(/#.*/, "") }
+        $1 == "desktop" && $2 == name { print $(n + 2); found = 1; exit }
+        END { exit (found ? 0 : 1) }' "$f"
+}
+
+# the services of a login manager, in start order: login-manager-services when given, else its own name
+distro_login_manager_services() {
+    local svcs
+    svcs="$(distro_named_values login-manager-services "$1")"
+    if [ -n "$svcs" ]; then echo "$svcs"; else echo "$1"; fi
+}
+
+# the repository URLs xbps uses on this system (or under $1), one per line
+configured_repositories() {
+    grep -hs '^[[:space:]]*repository[[:space:]]*=' "${1:-}"/etc/xbps.d/*.conf "${1:-}"/usr/share/xbps.d/*.conf |
+        sed 's/^[^=]*=[[:space:]]*//'
+}
+
+# true when a desktop needs no particular repository, or one configured on this system provides it
+desktop_repository_available() {
+    local word
+    word="$(distro_named_values desktop-repository "$1" | head -n 1)"
+    [ -z "$word" ] || configured_repositories "${2:-}" | grep -qF -- "$word"
+}
+
 # Fails (with file:line: reason on stderr) on an unknown key or an unsafe name. Run before anything is touched.
 distro_conf_check() {
     local f
@@ -82,10 +138,41 @@ distro_conf_check() {
             } else if (key == "default-shell") {
                 if (NF != 2) bad("default-shell takes exactly one shell name")
                 else { dflt = $2; dflt_line = NR }
-            } else if (key == "install" || key == "remove" || key == "enable" || key == "disable" || key == "vbox-guest-install" || key == "vbox-guest-enable") {
+            } else if (key == "install" || key == "remove" || key == "enable" || key == "disable" || key == "vbox-guest-install" || key == "vbox-guest-enable" || key == "headless-remove") {
                 if (NF < 2) bad(key " needs at least one name")
                 for (i = 2; i <= NF; i++)
                     if ($i !~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/) bad("invalid name for " key ": " $i)
+            } else if (key == "desktop") {
+                if (NF < 5) bad("desktop takes a name, a session, a login manager and a label")
+                else if ($2 !~ /^[a-z][a-z0-9-]*$/ || $2 == "none") bad("invalid desktop name: " $2)
+                else if ($3 !~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/) bad("invalid session name: " $3)
+                else if ($4 !~ /^[a-z][a-z0-9-]*$/) bad("invalid login manager name: " $4)
+                else if ($2 in desktops) bad("desktop defined twice: " $2)
+                else { desktops[$2] = 1; if ($4 != "none") { dm_ref[$2] = $4; dm_ref_line[$2] = NR } }
+            } else if (key == "login-manager") {
+                if (NF < 3) bad("login-manager takes a name and at least one package")
+                else if ($2 !~ /^[a-z][a-z0-9-]*$/ || $2 == "none") bad("invalid login manager name: " $2)
+                else {
+                    managers[$2] = 1
+                    for (i = 3; i <= NF; i++)
+                        if ($i !~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/) bad("invalid package name: " $i)
+                }
+            } else if (key == "desktop-repository") {
+                if (NF != 3) bad("desktop-repository takes a desktop name and one word of a repository URL")
+                else if ($3 !~ /^[A-Za-z0-9][A-Za-z0-9._:\/+-]*$/) bad("invalid repository word: " $3)
+                else ref_d[$2] = NR
+            } else if (key == "desktop-packages" || key == "login-manager-services" || key == "login-manager-needs" || key == "desktop-official") {
+                first = (key == "desktop-official") ? 2 : 3
+                if (NF < first) bad(key " needs a name and at least one value")
+                for (i = 2; i <= NF; i++)
+                    if ($i !~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/) bad("invalid name for " key ": " $i)
+                # names are checked against their definitions at the end (definitions may come later)
+                if (key == "desktop-official") { for (i = 2; i <= NF; i++) { ref_d[$i] = NR } }
+                else if (key == "desktop-packages") ref_d[$2] = NR
+                else {
+                    ref_m[$2] = NR
+                    if (key == "login-manager-needs") for (i = 3; i <= NF; i++) ref_d[$i] = NR
+                }
             } else {
                 bad("unknown key: " key)
             }
@@ -95,6 +182,9 @@ distro_conf_check() {
                 printf "%s:%d: default-shell names a shell that no shell line defines: %s\n", file, dflt_line, dflt > "/dev/stderr"
                 rc = 1
             }
+            for (d in ref_d) if (!(d in desktops)) { printf "%s:%d: no desktop line defines %s\n", file, ref_d[d], d > "/dev/stderr"; rc = 1 }
+            for (m in ref_m) if (!(m in managers)) { printf "%s:%d: no login-manager line defines %s\n", file, ref_m[m], m > "/dev/stderr"; rc = 1 }
+            for (d in dm_ref) if (!(dm_ref[d] in managers)) { printf "%s:%d: no login-manager line defines %s\n", file, dm_ref_line[d], dm_ref[d] > "/dev/stderr"; rc = 1 }
             exit rc
         }' "$f"
 }

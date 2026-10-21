@@ -69,6 +69,49 @@ try "vbox service with a slash"         'vbox-guest-enable ../x'
 try "key without values"                'install'
 try "too many words for a shell"        'shell fish /usr/bin/fish fish-shell extra'
 try "two words for default-shell"       $'shell a /bin/a\nshell b /bin/b\ndefault-shell a b'
+try "desktop without a label"           $'login-manager sddm sddm\ndesktop kde plasma sddm'
+try "desktop called none"               $'login-manager sddm sddm\ndesktop none plasma sddm Nothing'
+try "desktop with an unknown login manager" 'desktop kde plasma kdm KDE'
+try "desktop defined twice"             $'login-manager sddm sddm\ndesktop kde plasma sddm KDE\ndesktop kde plasma sddm KDE again'
+try "packages for an undefined desktop" 'desktop-packages kde kde-plasma'
+try "desktop package with a metacharacter" $'login-manager sddm sddm\ndesktop kde plasma sddm KDE\ndesktop-packages kde kde;rm'
+try "official for an undefined desktop" 'desktop-official kde'
+try "login manager without packages"    'login-manager sddm'
+try "services for an undefined login manager" 'login-manager-services sddm sddm'
+try "needs an undefined desktop"        $'login-manager gdm gdm\nlogin-manager-needs gdm gnome'
+try "headless package with a slash"     'headless-remove ../x'
+try "repository for an undefined desktop" 'desktop-repository kde voidlab'
+try "repository word with a space or quote" $'login-manager sddm sddm\ndesktop kde plasma sddm KDE\ndesktop-repository kde "x'
+try "two repository words"              $'login-manager sddm sddm\ndesktop kde plasma sddm KDE\ndesktop-repository kde a b'
+cat > "$DISTRO_CONF_DEFAULT" <<'C'
+desktop kde plasma sddm KDE Plasma   # a label of several words
+desktop tty none none Console tools
+desktop-packages kde plasma-workspace kde-plasma
+desktop-official kde
+login-manager sddm sddm xorg-minimal
+login-manager cosmic-greeter cosmic-greeter
+login-manager-services cosmic-greeter cosmic-greeter-daemon cosmic-greeter
+login-manager-needs sddm kde
+headless-remove firefox
+desktop-repository kde voidlab
+C
+distro_conf_check 2>"$T/err" && ok "desktops and login managers pass the check" || bad "a good desktop file was rejected: $(cat "$T/err")"
+check "desktop names, in order"           "$(distro_names desktop | tr '\n' ' ')" "kde tty "
+check "a desktop's session"               "$(distro_desktop_field kde 1)" "plasma"
+check "a desktop's login manager"         "$(distro_desktop_field kde 2)" "sddm"
+check "a desktop's packages"              "$(distro_named_values desktop-packages kde | tr '\n' ' ')" "plasma-workspace kde-plasma "
+check "a login manager's own service"     "$(distro_login_manager_services sddm)" "sddm"
+check "a login manager's services, in order" "$(distro_login_manager_services cosmic-greeter | tr '\n' ' ')" "cosmic-greeter-daemon cosmic-greeter "
+mkdir -p "$T/root/etc/xbps.d" "$T/root/usr/share/xbps.d"
+echo 'repository=https://repo-default.voidlinux.org/current' > "$T/root/usr/share/xbps.d/00-repository-main.conf"
+desktop_repository_available kde "$T/root" && bad "a desktop was offered without its repository" || ok "a desktop needs its repository"
+desktop_repository_available tty "$T/root" && ok "a desktop without a repository rule is always available" || bad "tty unavailable"
+echo 'repository=https://github.com/mendescotta/voidlab-testing/releases/download/repo' > "$T/root/etc/xbps.d/20-voidlab.conf"
+desktop_repository_available kde "$T/root" && ok "with the repository configured it is available" || bad "kde unavailable with voidlab"
+distro_desktop_field nosuch 1 >/dev/null && bad "an undefined desktop was found" || ok "an undefined desktop is not found"
+DISTRO_CONF_DEFAULT="$HERE/resources/backend/distro.conf"
+distro_conf_check 2>"$T/err" && ok "the shipped distro.conf passes the check" || bad "the shipped distro.conf: $(cat "$T/err")"
+DISTRO_CONF_DEFAULT="$T/default.conf"
 printf 'shell bash /bin/bash\nbogus x\n' > "$DISTRO_CONF_DEFAULT"; distro_conf_check 2>"$T/err"
 grep -q ':2:' "$T/err" && ok "the message names the line" || bad "message lacks the line number: $(cat "$T/err")"
 

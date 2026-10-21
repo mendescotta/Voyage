@@ -278,6 +278,15 @@ reset_live_autologin() {
     if [ -f "$conf" ] && grep -q "^User=${live}\$" "$conf"; then
         rm -f "$conf"
     fi
+
+    # greetd (cosmic-greeter): an [initial_session] for the live user
+    for conf in "$TARGETDIR"/etc/greetd/*.toml; do
+        [ -f "$conf" ] || continue
+        if awk -v user="$live" '/^\[/ { s = ($0 == "[initial_session]") } s && $0 ~ "^user *= *\"" user "\"$" { f = 1 } END { exit !f }' "$conf"; then
+            awk '/^\[/ { skip = ($0 == "[initial_session]") } !skip' "$conf" > "$conf.voyage"
+            cat "$conf.voyage" > "$conf" && rm -f "$conf.voyage"
+        fi
+    done
 }
 
 # Percent (0-99) of the root copy done: <tar records read> <total bytes>. tar counts 10240-byte records.
@@ -704,18 +713,210 @@ set_useraccount() {
     fi
 }
 
+# ---- desktop and login manager: DESKTOP <name>|none, KEEPDESKTOP 1, DISPLAYMANAGER <name>|none. The names
+# and their packages come from distro.conf. An empty value leaves that part as the copy brought it.
+
+# The desktop the live image has, and so the copied system: the first desktop whose first package is installed.
+find_shipped_desktop() {
+    local name pkg
+    for name in $(distro_names desktop); do
+        pkg="$(distro_named_values desktop-packages "$name" | head -n 1)"
+        if [ -n "$pkg" ] && xbps-query "$pkg" >/dev/null 2>&1; then
+            echo "$name"
+            return 0
+        fi
+    done
+}
+
+# Runs before anything is touched: an unknown name, or a choice that needs the network on an offline
+# install, stops the installation here and not halfway through.
+check_desktop_choice() {
+    local want dm pkg
+    want="$(get_option DESKTOP)"
+    dm="$(get_option DISPLAYMANAGER)"
+    SHIPPED_DESKTOP="$(find_shipped_desktop)"
+    if [ -n "$want" ] && [ "$want" != none ] && [ "$want" != "$SHIPPED_DESKTOP" ]; then
+        distro_desktop_field "$want" 1 >/dev/null || die "distro.conf defines no desktop $want"
+        [ "$(get_option UPDATE)" = 1 ] || die "The $want desktop is not on the live image and needs an online mirror"
+        desktop_repository_available "$want" || \
+            die "The $want desktop needs a repository this live image does not configure ($(distro_named_values desktop-repository "$want"))"
+    fi
+    if [ -n "$dm" ] && [ "$dm" != none ]; then
+        distro_names login-manager | grep -qxF "$dm" || die "distro.conf defines no login manager $dm"
+        [ "$want" != none ] || die "A login manager needs a desktop"
+        pkg="$(distro_named_values login-manager "$dm" | head -n 1)"
+        if [ "$(get_option UPDATE)" != 1 ] && ! xbps-query "$pkg" >/dev/null 2>&1; then
+            die "The $dm login manager is not on the live image and needs an online mirror"
+        fi
+    fi
+}
+
+# the session (its .desktop name) the new system logs into: the chosen desktop's, or the copied one's
+new_system_session() {
+    local desktop
+    desktop="$(get_option DESKTOP)"
+    [ -n "$desktop" ] || desktop="$SHIPPED_DESKTOP"
+    [ -n "$desktop" ] && [ "$desktop" != none ] || return 0
+    distro_desktop_field "$desktop" 1
+}
+
+installed_package_names() {
+    chroot "$TARGETDIR" xbps-query -l | awk '{ sub(/-[^-]*$/, "", $2); print $2 }' | sort
+}
+
+# Installs those of the packages the new system lacks. A desktop listed in desktop-official comes from Void's
+# own repositories only, and everything that brought in is repolocked, so updates never swap it for the
+# voidlab build of the same package.
+# The live image's xbps.d carries its build's exclusions as ignorepkg lines (vessel's packages.exclude), which
+# would leave another desktop's dependencies unresolved (KDE needs AppStream, which the Xfce image ignores).
+# The transaction runs on a copy of xbps.d without them, and what it installed is no longer ignored after.
+install_desktop_packages() {
+    local desktop="$1" pkg missing="" url before conf confdir="/tmp/voyage-xbps.d"
+    shift
+    for pkg in "$@"; do
+        chroot "$TARGETDIR" xbps-query "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
+    done
+    [ -n "$missing" ] || return 0
+    log_ui "DESKTOP"
+    echo "Installing for $desktop:$missing"
+    rm -rf "$TARGETDIR$confdir"
+    install -d "$TARGETDIR$confdir"
+    for conf in "$TARGETDIR"/etc/xbps.d/*.conf; do
+        [ -f "$conf" ] && grep -v '^[[:space:]]*ignorepkg[[:space:]]*=' "$conf" > "$TARGETDIR$confdir/${conf##*/}"
+    done
+    before="$(installed_package_names)"
+    if distro_values desktop-official | grep -qxF "$desktop"; then
+        url="${MIRRORS[$(get_option MIRROR)]}"
+        [ -n "$url" ] || die "No Void mirror to install $desktop from"
+        local -a repos=(--repository="${url}current")
+        [ "$(get_option NONFREE)" = 1 ] && repos+=(--repository="${url}current/nonfree")
+        chroot "$TARGETDIR" xbps-install -C "$confdir" -Sy --ignore-conf-repos "${repos[@]}" $missing || \
+            die "Error installing $desktop from Void's repositories"
+    else
+        chroot "$TARGETDIR" xbps-install -C "$confdir" -Sy $missing || die "Error installing $desktop"
+    fi
+    rm -rf "$TARGETDIR$confdir"
+    for pkg in $(comm -13 <(printf '%s\n' "$before") <(installed_package_names)); do
+        for conf in "$TARGETDIR"/etc/xbps.d/*.conf; do
+            [ -f "$conf" ] && sed -i "/^[[:space:]]*ignorepkg[[:space:]]*=[[:space:]]*${pkg//./\\.}[[:space:]]*\$/d" "$conf"
+        done
+        if distro_values desktop-official | grep -qxF "$desktop"; then
+            chroot "$TARGETDIR" xbps-pkgdb -m repolock "$pkg" || echo "Warning: could not repolock $pkg" >&2
+        fi
+    done
+}
+
+# Removes those of the packages the new system has, with what only they needed. When xbps refuses the
+# whole set (something that stays still needs one of them), each is retried on its own until nothing more
+# goes, and what stays is reported. Never fatal: a leftover package does no harm.
+remove_present_packages() {
+    local pkg present="" left progress=1
+    for pkg in "$@"; do
+        chroot "$TARGETDIR" xbps-query "$pkg" >/dev/null 2>&1 && present="$present $pkg"
+    done
+    [ -n "$present" ] || return 0
+    chroot "$TARGETDIR" xbps-remove -Ry $present && return 0
+    while [ "$progress" = 1 ]; do
+        progress=0
+        left=""
+        for pkg in $present; do
+            chroot "$TARGETDIR" xbps-query "$pkg" >/dev/null 2>&1 || continue
+            if chroot "$TARGETDIR" xbps-remove -Ry "$pkg"; then progress=1; else left="$left $pkg"; fi
+        done
+        present="$left"
+    done
+    [ -z "$present" ] || log_ui "Kept because other packages still need them:$present"
+}
+
+# The desktop of the new system. The copy brought the live image's along; another one is installed from the
+# network, and the copied one is removed unless kept (KEEPDESKTOP 1). Removing it also removes the login
+# managers not chosen, and for "none" the live image's graphical applications (headless-remove). What the new
+# desktop needs is never removed.
+apply_desktop() {
+    local want keep dm install="" remove="" name pkg
+    want="$(get_option DESKTOP)"
+    keep="$(get_option KEEPDESKTOP)"
+    dm="$(get_option DISPLAYMANAGER)"
+    [ -n "$want" ] || return 0
+    if [ "$want" != none ] && [ "$want" != "$SHIPPED_DESKTOP" ]; then
+        install="$(distro_named_values desktop-packages "$want")"
+    fi
+    if [ -n "$dm" ] && [ "$dm" != none ]; then
+        install="$install $(distro_named_values login-manager "$dm")"
+    fi
+    [ "$want" = none ] || install_desktop_packages "$want" $install
+
+    [ -n "$SHIPPED_DESKTOP" ] && [ "$want" != "$SHIPPED_DESKTOP" ] && [ "$keep" != 1 ] || return 0
+    remove="$(distro_named_values desktop-packages "$SHIPPED_DESKTOP")"
+    for name in $(distro_names login-manager); do
+        [ "$name" = "$dm" ] || remove="$remove $(distro_named_values login-manager "$name")"
+    done
+    [ "$want" = none ] && remove="$remove $(distro_values headless-remove)"
+    log_ui "DESKTOP_REMOVE"
+    remove_present_packages $(for pkg in $remove; do
+        case " $(echo $install) " in *" $pkg "*) ;; *) echo "$pkg" ;; esac
+    done | awk '!seen[$0]++')
+}
+
+# lightdm reads lightdm.conf after lightdm.conf.d: a value left there (the live image sets user-session=xfce)
+# would win over ours, so an existing line is changed in place.
+set_lightdm_option() {
+    local conf="$TARGETDIR/etc/lightdm/lightdm.conf"
+    if [ -f "$conf" ] && grep -q "^$1=" "$conf"; then
+        sed -i "s|^$1=.*|$1=$2|" "$conf"
+    fi
+}
+
+# The login manager that starts at boot. Every one distro.conf knows is switched off first (the copy brought
+# the live image's along), then the chosen one on; "none" leaves the console login.
+set_login_manager() {
+    local dm name svc session
+    dm="$(get_option DISPLAYMANAGER)"
+    [ -n "$dm" ] || return 0
+    for name in $(distro_names login-manager); do
+        for svc in $(distro_login_manager_services "$name"); do
+            disable_service "$svc"
+        done
+    done
+    [ "$dm" != none ] || return 0
+    for svc in $(distro_login_manager_services "$dm"); do
+        enable_service_checked "$svc" || log_ui "The new system has no $svc service; it starts on the console."
+    done
+    session="$(new_system_session)"
+    if [ "$dm" = lightdm ] && [ -n "$session" ]; then
+        set_lightdm_option user-session "$session"
+        install -d "$TARGETDIR/etc/lightdm/lightdm.conf.d"
+        printf '[Seat:*]\nuser-session=%s\n' "$session" > "$TARGETDIR/etc/lightdm/lightdm.conf.d/40-voyage-session.conf"
+    fi
+}
+
+# greetd starts an [initial_session] once, at boot, without asking: its autologin. The command is the
+# session's Exec line.
+set_greetd_autologin() {
+    local conf="$1" user="$2" session="$3" cmd="" f
+    for f in "$TARGETDIR/usr/share/wayland-sessions/$session.desktop" "$TARGETDIR/usr/share/xsessions/$session.desktop"; do
+        if [ -f "$f" ]; then
+            cmd="$(sed -n 's/^Exec=//p' "$f" | head -n 1)"
+            break
+        fi
+    done
+    if [ ! -f "$conf" ] || [ -z "$cmd" ] || [[ $cmd == *[\"\\]* ]]; then
+        echo "Autologin not configured: no greetd configuration or no usable session for $session."
+        return 0
+    fi
+    awk '/^\[/ { skip = ($0 == "[initial_session]") } !skip' "$conf" > "$conf.voyage"
+    printf '\n[initial_session]\ncommand = "%s"\nuser = "%s"\n' "$cmd" "$user" >> "$conf.voyage"
+    cat "$conf.voyage" > "$conf" && rm -f "$conf.voyage"
+}
+
 set_autologin() {
     local enabled="$(get_option AUTOLOGIN)"
     local manager="$(get_option DISPLAYMANAGER)"
     local userlogin="$(get_option USERLOGIN)"
+    local session
 
     [ "$enabled" = "1" ] || return 0
-
-    case "$manager" in
-        sddm|lightdm|gdm)
-            enable_service "$manager"
-            ;;
-    esac
+    session="$(new_system_session)"
 
     case "$manager" in
         sddm)
@@ -723,7 +924,7 @@ set_autologin() {
             cat > "$TARGETDIR/etc/sddm.conf.d/10-voyage-autologin.conf" <<EOF
 [Autologin]
 User=$userlogin
-Session=default.desktop
+Session=${session:-default}.desktop
 Relogin=false
 EOF
             ;;
@@ -734,6 +935,13 @@ EOF
 autologin-user=$userlogin
 autologin-user-timeout=0
 EOF
+            if [ -n "$session" ]; then
+                echo "autologin-session=$session" >> "$TARGETDIR/etc/lightdm/lightdm.conf.d/50-voyage-autologin.conf"
+                set_lightdm_option autologin-session "$session"
+            fi
+            ;;
+        cosmic-greeter)
+            set_greetd_autologin "$TARGETDIR/etc/greetd/cosmic-greeter.toml" "$userlogin" "$session"
             ;;
         gdm)
             if [ -d "$TARGETDIR/etc/gdm" ]; then
@@ -759,11 +967,8 @@ EOF
                 sed -i "/^AutomaticLoginEnable=/a AutomaticLogin=$userlogin" "$target_gdm_config"
             fi
             ;;
-        greetd)
-            echo "Autologin not configured: greetd is not supported by this installer."
-            ;;
         *)
-            echo "Autologin not configured: no supported display manager was detected."
+            echo "Autologin not configured: ${manager:-no login manager} has no autologin support here."
             ;;
     esac
 }
@@ -1045,6 +1250,7 @@ echo "Log started at $LOG"
 
 check_not_live_medium
 distro_conf_check || die "distro.conf is invalid (see the messages above)"
+check_desktop_choice
 
 log_ui "CREATE_FS"
 create_filesystems
@@ -1072,6 +1278,7 @@ set_machine_id
 set_mirror
 install_extra_software
 install_distro_packages
+apply_desktop
 install_vbox_guest
 install_hardware_drivers
 apply_distro_services
@@ -1083,6 +1290,7 @@ chroot "$TARGETDIR" dracut $(initramfs_dracut_args) --omit "crypt overlayfs-cryp
 log_ui "USER_CONFIG"
 set_rootpassword
 set_useraccount
+set_login_manager
 set_autologin
 set_login_shells
 

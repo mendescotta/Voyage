@@ -95,7 +95,6 @@ impl UsersPage {
 
         let autologin_row = SwitchRow::new("Log in automatically");
         user_group.add(&autologin_row);
-        configure_autologin(&autologin_row, sys_data.display_manager.as_deref());
 
         Self {
             widget,
@@ -112,6 +111,12 @@ impl UsersPage {
             root_shell_row,
             shell_names,
         }
+    }
+
+    /// What the Mirror and Software page calls when the login manager changes.
+    pub fn login_manager_handler(&self) -> impl Fn(Option<&str>) + 'static {
+        let row = self.autologin_row.clone();
+        move |label| configure_autologin(&row, label)
     }
 
     pub fn collect(&self) -> (UsersFields, Vec<(String, String)>) {
@@ -174,26 +179,17 @@ fn shell_hint(distro: &DistroConf, net: bool) -> Option<String> {
     }
 }
 
-fn configure_autologin(row: &SwitchRow, display_manager: Option<&str>) {
-    let manager = display_manager.unwrap_or("").to_lowercase();
-    match manager.as_str() {
-        "sddm" | "lightdm" | "gdm" => {
+/// Autologin goes through the login manager (Mirror and Software page): without one there is none.
+fn configure_autologin(row: &SwitchRow, login_manager: Option<&str>) {
+    match login_manager {
+        Some(label) => {
             row.set_sensitive(true);
-            row.set_visible(true);
-            row.set_subtitle(&format!(
-                "Available via {display_manager}.",
-                display_manager = display_manager.unwrap_or("")
-            ));
+            row.set_subtitle(&format!("Through {label}."));
         }
-        "greetd" => {
+        None => {
             row.set_active(false);
             row.set_sensitive(false);
-            row.set_visible(true);
-            row.set_subtitle("Not supported with greetd.");
-        }
-        _ => {
-            row.set_active(false);
-            row.set_visible(false);
+            row.set_subtitle("Needs a login manager (Mirror and Software).");
         }
     }
 }

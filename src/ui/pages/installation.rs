@@ -17,6 +17,8 @@ fn status_label(token: &str) -> &str {
         "MIRROR" => "Configuring repository server...",
         "NON-FREE" => "Configuring proprietary software repositories.",
         "HARDWARE" => "Installing drivers for this hardware...",
+        "DESKTOP" => "Installing the desktop...",
+        "DESKTOP_REMOVE" => "Removing the live image's desktop...",
         "USER_CONFIG" => "Creating users and passwords...",
         "GRUB_INSTALL" => "Installing the boot loader...",
         "REMOVE_PACKAGES" => "Removing selected packages...",

@@ -1,4 +1,5 @@
 pub mod completion;
+pub mod desktop;
 pub mod disks;
 pub mod installation;
 pub mod mirrors;
